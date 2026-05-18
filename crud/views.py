@@ -9,8 +9,8 @@ def read(request):
     return HttpResponse("read page")
 
 
-def update(request):
-    return HttpResponse("update page")
+def update(request, rtmp_id):
+    return HttpResponse(f"update page {rtmp_id}")
 
 
 def delete(request):
