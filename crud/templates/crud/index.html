@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Title</title>
+</head>
+<body>
+	{% if rtmps.count > 0 %}
+		<ul>
+			{% for rtmp in rtmps %}
+				<li>
+					<a href="/rtmp/{{ rtmp.id }}/">
+						test
+					</a>
+				</li>
+			{% endfor %}
+		</ul>
+	{% else %}
+		<p>No rtmp are available.</p>
+	{% endif %}
+</body>
+</html>
