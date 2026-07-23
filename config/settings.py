@@ -135,3 +135,11 @@ else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "webmaster@localhost")
+
+
+# RTMP
+# Адрес нашего сервера приёма RTMP-потоков (nginx-rtmp пока не поднят —
+# используется только для отображения ссылки на публикацию пользователю).
+
+RTMP_SERVER_HOST = os.getenv("RTMP_SERVER_HOST", "")
+RTMP_APP = os.getenv("RTMP_APP", "live")

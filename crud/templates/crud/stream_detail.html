@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="UTF-8">
+	<title>{{ stream.name }}</title>
+</head>
+<body>
+	<h1>{{ stream.name }}</h1>
+
+	{% if stream.publish_url %}
+		<p>Ссылка на публикацию: <code>{{ stream.publish_url }}</code></p>
+	{% else %}
+		<p>Ссылка на публикацию пока не настроена (не задан RTMP_SERVER_HOST).</p>
+	{% endif %}
+	<p>Ключ потока: <code>{{ stream.stream_key }}</code></p>
+
+	<p><a href="{% url 'crud:stream_delete' stream.id %}">Удалить точку приёма</a></p>
+
+	<h2>Куда рестримим</h2>
+	<p><a href="{% url 'crud:destination_create' stream.id %}">Добавить destination</a></p>
+	{% if stream.destinations.all %}
+		<ul>
+			{% for destination in stream.destinations.all %}
+				<li>
+					{{ destination.socialmedia_name }}
+					(<a href="{% url 'crud:destination_update' destination.id %}">изменить</a> |
+					<a href="{% url 'crud:destination_delete' destination.id %}">удалить</a>)
+				</li>
+			{% endfor %}
+		</ul>
+	{% else %}
+		<p>Destination-ов пока нет.</p>
+	{% endif %}
+
+	<p><a href="{% url 'crud:index' %}">Назад к списку</a></p>
+</body>
+</html>

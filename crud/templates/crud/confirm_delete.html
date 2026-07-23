@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="UTF-8">
+	<title>Подтвердите удаление</title>
+</head>
+<body>
+	<h1>Удалить «{{ object_label }}»?</h1>
+	<form method="post">
+		{% csrf_token %}
+		<button type="submit">Удалить</button>
+	</form>
+</body>
+</html>
