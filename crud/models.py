@@ -29,6 +29,15 @@ class Stream(models.Model):
             f"rtmp://{settings.RTMP_SERVER_HOST}/{settings.RTMP_APP}/{self.stream_key}"
         )
 
+    @property
+    def srt_publish_url(self):
+        if not settings.SRT_SERVER_HOST:
+            return None
+        return (
+            f"srt://{settings.SRT_SERVER_HOST}:{settings.SRT_PORT}"
+            f"?streamid=publish:{self.stream_key}"
+        )
+
 
 class Rtmp(models.Model):
     stream = models.ForeignKey(

@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, override_settings
@@ -365,3 +366,68 @@ class StreamRestartViewTests(TestCase):
         with patch("crud.views.restart_stream", return_value=False):
             response = self.client.post(url, follow=True)
         self.assertContains(response, "Не удалось перезапустить")
+
+
+@override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)
+class SrtAuthHookTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="srtowner",
+            email="srtowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="SRT stream")
+
+    def post_payload(self, url, payload):
+        return self.client.post(
+            url, data=json.dumps(payload), content_type="application/json"
+        )
+
+    def test_rejects_without_valid_secret(self):
+        url = reverse("crud:srt_auth_hook")
+        response = self.post_payload(
+            url, {"action": "publish", "path": self.stream.stream_key}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_allows_non_publish_actions_without_key_check(self):
+        url = f"{reverse('crud:srt_auth_hook')}?secret={HOOK_SECRET}"
+        response = self.post_payload(url, {"action": "read", "path": "no-such-key"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_publish_accepts_known_stream_key(self):
+        url = f"{reverse('crud:srt_auth_hook')}?secret={HOOK_SECRET}"
+        response = self.post_payload(
+            url, {"action": "publish", "path": self.stream.stream_key}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_publish_rejects_unknown_stream_key(self):
+        url = f"{reverse('crud:srt_auth_hook')}?secret={HOOK_SECRET}"
+        response = self.post_payload(url, {"action": "publish", "path": "no-such-key"})
+        self.assertEqual(response.status_code, 403)
+
+
+class SrtPublishUrlTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="srturlowner",
+            email="srturlowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="SRT url stream")
+
+    @override_settings(SRT_SERVER_HOST="")
+    def test_none_when_not_configured(self):
+        self.assertIsNone(self.stream.srt_publish_url)
+
+    @override_settings(SRT_SERVER_HOST="example.com", SRT_PORT="8890")
+    def test_builds_url_when_configured(self):
+        self.assertEqual(
+            self.stream.srt_publish_url,
+            f"srt://example.com:8890?streamid=publish:{self.stream.stream_key}",
+        )

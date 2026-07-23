@@ -48,6 +48,20 @@ services:
       - "1935:1935"
       - "127.0.0.1:8080:8080"
 
+  srt:
+    build:
+      context: .
+      dockerfile: srt-gateway/Dockerfile
+    environment:
+      DJANGO_HOOK_BASE_URL: http://django:8000
+      RTMP_HOOK_SECRET: ${RTMP_HOOK_SECRET}
+      NGINX_RTMP_HOST: nginx
+    depends_on:
+      - django
+      - nginx
+    ports:
+      - "8890:8890/udp"
+
 volumes:
   postgres_data:
   static_files:

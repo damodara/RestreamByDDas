@@ -1,0 +1,15 @@
+srt: true
+srtAddress: :8890
+
+authMethod: http
+authHTTPAddress: ${DJANGO_HOOK_BASE_URL}/crud/rtmp-hooks/srt-auth/?secret=${RTMP_HOOK_SECRET}
+
+paths:
+  all_others:
+    # start.sh держится на переднем плане (exec ffmpeg) — MediaMTX сама шлёт
+    # ему сигнал остановки, когда поток перестаёт быть готов, отдельный
+    # runOnNotReady/PID-файл не нужны. runOnReadyRestart перезапускает мост,
+    # если он не устоял с первой попытки (например nginx/сеть замешкались
+    # в самом начале публикации) — иначе поток остался бы без relay.
+    runOnReady: /srt-bridge/start.sh $MTX_PATH
+    runOnReadyRestart: yes

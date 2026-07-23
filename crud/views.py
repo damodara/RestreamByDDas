@@ -1,3 +1,5 @@
+import json
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -149,3 +151,20 @@ def stream_destinations_hook(request, stream_key):
         {"push_url": destination.push_url} for destination in stream.destinations.all()
     ]
     return JsonResponse(destinations, safe=False)
+
+
+@csrf_exempt
+@require_POST
+def srt_auth_hook(request):
+    if not _hook_authorized(request):
+        return HttpResponseForbidden()
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponseForbidden()
+    if payload.get("action") != "publish":
+        return HttpResponse(status=200)
+    stream_key = payload.get("path", "")
+    if Stream.objects.filter(stream_key=stream_key).exists():
+        return HttpResponse(status=200)
+    return HttpResponseForbidden()

@@ -139,15 +139,16 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 
 
 # RTMP
-# Адрес нашего сервера приёма RTMP-потоков (nginx-rtmp пока не поднят —
-# используется только для отображения ссылки на публикацию пользователю).
+# Публичный адрес сервера приёма RTMP-потоков — используется только для
+# отображения ссылки на публикацию пользователю (задаётся вручную в .env,
+# т.к. это внешний адрес, а не внутренний compose-хост).
 
 RTMP_SERVER_HOST = os.getenv("RTMP_SERVER_HOST", "")
 RTMP_APP = os.getenv("RTMP_APP", "live")
 
-# Общий секрет, которым nginx-rtmp (on_publish) и rtmp-push/push.sh
-# подтверждают Django, что запрос пришёл от нашей RTMP-инфраструктуры.
-# Пустое значение = хуки всегда отказывают (fail closed).
+# Общий секрет, которым вся наша инфраструктура (nginx-rtmp on_publish,
+# rtmp-push/push.sh, MediaMTX authHTTPAddress) подтверждает Django, что
+# запрос пришёл от неё. Пустое значение = хуки всегда отказывают (fail closed).
 RTMP_HOOK_SECRET = os.getenv("RTMP_HOOK_SECRET", "")
 
 # Откуда брать /stat nginx-rtmp для статистики потоков. Пусто = статистика
@@ -157,3 +158,10 @@ NGINX_STAT_URL = os.getenv("NGINX_STAT_URL", "")
 # Базовый URL control-модуля nginx-rtmp (без /control/...) для рестарта
 # трансляции. Пусто = рестарт недоступен.
 NGINX_CONTROL_URL = os.getenv("NGINX_CONTROL_URL", "")
+
+# SRT
+# Публичный адрес и порт SRT-шлюза (MediaMTX) — тот же принцип, что и у
+# RTMP_SERVER_HOST: задаётся вручную в .env, не переопределяется в compose.
+
+SRT_SERVER_HOST = os.getenv("SRT_SERVER_HOST", "")
+SRT_PORT = os.getenv("SRT_PORT", "8890")

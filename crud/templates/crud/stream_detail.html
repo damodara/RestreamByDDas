@@ -16,9 +16,14 @@
 	{% endif %}
 
 	{% if stream.publish_url %}
-		<p>Ссылка на публикацию: <code>{{ stream.publish_url }}</code></p>
+		<p>RTMP: <code>{{ stream.publish_url }}</code></p>
 	{% else %}
-		<p>Ссылка на публикацию пока не настроена (не задан RTMP_SERVER_HOST).</p>
+		<p>Ссылка RTMP пока не настроена (не задан RTMP_SERVER_HOST).</p>
+	{% endif %}
+	{% if stream.srt_publish_url %}
+		<p>SRT: <code>{{ stream.srt_publish_url }}</code></p>
+	{% else %}
+		<p>Ссылка SRT пока не настроена (не задан SRT_SERVER_HOST).</p>
 	{% endif %}
 	<p>Ключ потока: <code>{{ stream.stream_key }}</code></p>
 
