@@ -1,0 +1,7 @@
+Новая заявка на регистрацию.
+
+Пользователь: {{ user.username }}
+Email: {{ user.email }}
+
+Подтвердить: {{ approve_url }}
+Отклонить: {{ reject_url }}

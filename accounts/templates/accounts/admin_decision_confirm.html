@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="UTF-8">
+	<title>Подтверждение решения</title>
+</head>
+<body>
+	{% if action == "approve" %}
+		<h1>Подтвердить регистрацию пользователя {{ user.username }} ({{ user.email }})?</h1>
+	{% else %}
+		<h1>Отклонить регистрацию пользователя {{ user.username }} ({{ user.email }})?</h1>
+	{% endif %}
+	<form method="post">
+		{% csrf_token %}
+		<button type="submit">{% if action == "approve" %}Подтвердить{% else %}Отклонить{% endif %}</button>
+	</form>
+</body>
+</html>

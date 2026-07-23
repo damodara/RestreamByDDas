@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="UTF-8">
+	<title>Результат</title>
+</head>
+<body>
+	{% if invalid %}
+		<h1>Ссылка недействительна</h1>
+		<p>Ссылка устарела или некорректна.</p>
+	{% elif already_processed %}
+		<h1>Заявка уже обработана</h1>
+		<p>Решение по регистрации пользователя {{ user.username }} уже было принято ранее.</p>
+	{% elif processed %}
+		<h1>{% if approved %}Пользователь подтверждён{% else %}Пользователь отклонён{% endif %}</h1>
+		<p>Решение по регистрации {{ user.username }} сохранено, пользователю отправлено письмо.</p>
+	{% endif %}
+</body>
+</html>
