@@ -14,6 +14,19 @@
 	{% endif %}
 	<p>Ключ потока: <code>{{ stream.stream_key }}</code></p>
 
+	<h2>Статистика</h2>
+	{% if stats is None %}
+		<p>Статистика недоступна.</p>
+	{% elif not stats.live %}
+		<p>Поток сейчас не идёт.</p>
+	{% else %}
+		<p>
+			В эфире: {{ stats.uptime_display }}<br>
+			Принято: {{ stats.bytes_in|filesizeformat }} ({{ stats.bw_in }} bit/s)<br>
+			Отдано: {{ stats.bytes_out|filesizeformat }} ({{ stats.bw_out }} bit/s)
+		</p>
+	{% endif %}
+
 	<p><a href="{% url 'crud:stream_delete' stream.id %}">Удалить точку приёма</a></p>
 
 	<h2>Куда рестримим</h2>

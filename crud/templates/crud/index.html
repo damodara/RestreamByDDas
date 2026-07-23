@@ -6,6 +6,14 @@
 </head>
 <body>
 	<h1>Мои точки приёма</h1>
+
+	<h2>Нагрузка сервера</h2>
+	<p>
+		Load average: {{ server_load.load1|floatformat:2 }} / {{ server_load.load5|floatformat:2 }} / {{ server_load.load15|floatformat:2 }}<br>
+		Память: {% if server_load.mem_used_percent is not None %}{{ server_load.mem_used_percent }}%{% else %}н/д{% endif %}<br>
+		Диск: {% if server_load.disk_used_percent is not None %}{{ server_load.disk_used_percent }}%{% else %}н/д{% endif %}
+	</p>
+
 	<p><a href="{% url 'crud:stream_create' %}">Создать точку приёма</a></p>
 	{% if streams %}
 		<ul>

@@ -22,6 +22,7 @@ services:
       # напрямую, поэтому Django должен принимать Host: django в
       # дополнение к публичному хосту из .env.
       ALLOWED_HOSTS: ${ALLOWED_HOSTS},django
+      NGINX_STAT_URL: http://nginx:8080/stat
     depends_on:
       db:
         condition: service_healthy

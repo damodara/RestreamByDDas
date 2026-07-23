@@ -7,6 +7,8 @@ from django.views.decorators.http import require_GET, require_POST
 
 from crud.forms import DestinationForm, StreamForm
 from crud.models import Rtmp, Stream
+from crud.nginx_stat import fetch_stream_stats
+from crud.server_load import get_server_load
 
 
 def _hook_authorized(request):
@@ -17,7 +19,11 @@ def _hook_authorized(request):
 @login_required
 def index(request):
     streams = Stream.objects.filter(owner=request.user)
-    return render(request, "crud/index.html", {"streams": streams})
+    return render(
+        request,
+        "crud/index.html",
+        {"streams": streams, "server_load": get_server_load()},
+    )
 
 
 @login_required
@@ -37,7 +43,14 @@ def stream_create(request):
 @login_required
 def stream_detail(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
-    return render(request, "crud/stream_detail.html", {"stream": stream})
+    stats = fetch_stream_stats(stream.stream_key)
+    if stats and stats.get("live"):
+        stats["uptime_display"] = (
+            f"{stats['uptime_seconds'] // 60}:{stats['uptime_seconds'] % 60:02d}"
+        )
+    return render(
+        request, "crud/stream_detail.html", {"stream": stream, "stats": stats}
+    )
 
 
 @login_required

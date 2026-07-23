@@ -149,3 +149,7 @@ RTMP_APP = os.getenv("RTMP_APP", "live")
 # подтверждают Django, что запрос пришёл от нашей RTMP-инфраструктуры.
 # Пустое значение = хуки всегда отказывают (fail closed).
 RTMP_HOOK_SECRET = os.getenv("RTMP_HOOK_SECRET", "")
+
+# Откуда брать /stat nginx-rtmp для статистики потоков. Пусто = статистика
+# недоступна (например, в голом dev без поднятого nginx-контейнера).
+NGINX_STAT_URL = os.getenv("NGINX_STAT_URL", "")

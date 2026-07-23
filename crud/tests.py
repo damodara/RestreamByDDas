@@ -1,10 +1,36 @@
+from unittest.mock import MagicMock, patch
+
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from accounts.models import User
 from crud.models import Rtmp, Stream
+from crud.nginx_stat import fetch_stream_stats
+from crud.server_load import get_server_load
 
 HOOK_SECRET = "test-hook-secret"
+STAT_URL = "http://nginx-test/stat"
+
+STAT_XML = b"""<?xml version="1.0" encoding="utf-8" ?>
+<rtmp>
+<server>
+<application>
+<name>live</name>
+<live>
+<stream>
+<name>known-key</name>
+<bytes_in>1000</bytes_in>
+<bytes_out>2000</bytes_out>
+<bw_in>100</bw_in>
+<bw_out>200</bw_out>
+<time>65000</time>
+</stream>
+<nclients>1</nclients>
+</live>
+</application>
+</server>
+</rtmp>
+"""
 
 
 class CrudOwnershipTests(TestCase):
@@ -166,3 +192,105 @@ class RtmpHooksTests(TestCase):
         url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
+
+
+class NginxStatTests(TestCase):
+    @override_settings(NGINX_STAT_URL="")
+    def test_returns_none_when_not_configured(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen") as mock_urlopen:
+            self.assertIsNone(fetch_stream_stats("known-key"))
+            mock_urlopen.assert_not_called()
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_none_when_unreachable(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen", side_effect=OSError):
+            self.assertIsNone(fetch_stream_stats("known-key"))
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_live_stats_for_matching_stream(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            stats = fetch_stream_stats("known-key")
+        self.assertEqual(
+            stats,
+            {
+                "live": True,
+                "bytes_in": 1000,
+                "bytes_out": 2000,
+                "bw_in": 100,
+                "bw_out": 200,
+                "uptime_seconds": 65,
+            },
+        )
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_not_live_for_unknown_stream(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            stats = fetch_stream_stats("no-such-key")
+        self.assertEqual(stats, {"live": False})
+
+
+class ServerLoadTests(TestCase):
+    def test_returns_expected_keys(self):
+        data = get_server_load()
+        self.assertIn("load1", data)
+        self.assertIsInstance(data["load1"], float)
+        self.assertIn("mem_used_percent", data)
+        self.assertIn("disk_used_percent", data)
+
+
+class StreamStatsViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="statsowner",
+            email="statsowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.user)
+        self.stream = Stream.objects.create(owner=self.user, name="Stats stream")
+
+    def test_stream_detail_shows_unavailable_when_stats_none(self):
+        with patch("crud.views.fetch_stream_stats", return_value=None):
+            response = self.client.get(
+                reverse("crud:stream_detail", args=[self.stream.id])
+            )
+        self.assertContains(response, "Статистика недоступна")
+
+    def test_stream_detail_shows_not_live(self):
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.client.get(
+                reverse("crud:stream_detail", args=[self.stream.id])
+            )
+        self.assertContains(response, "не идёт")
+
+    def test_stream_detail_shows_live_stats(self):
+        stats = {
+            "live": True,
+            "bytes_in": 1000,
+            "bytes_out": 2000,
+            "bw_in": 100,
+            "bw_out": 200,
+            "uptime_seconds": 65,
+        }
+        with patch("crud.views.fetch_stream_stats", return_value=stats):
+            response = self.client.get(
+                reverse("crud:stream_detail", args=[self.stream.id])
+            )
+        self.assertContains(response, "В эфире")
+        self.assertContains(response, "1:05")
+
+    def test_index_renders_server_load_panel(self):
+        response = self.client.get(reverse("crud:index"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Нагрузка сервера")
