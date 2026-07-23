@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  django:
+    build: .
+    env_file: .env
+    environment:
+      DB_HOST: db
+      # nginx-хуки (on_publish/destinations) ходят на http://django:8000
+      # напрямую, поэтому Django должен принимать Host: django в
+      # дополнение к публичному хосту из .env.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS},django
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - static_files:/app/staticfiles
+    ports:
+      - "8000:8000"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    environment:
+      DJANGO_HOOK_BASE_URL: http://django:8000
+      RTMP_HOOK_SECRET: ${RTMP_HOOK_SECRET}
+    depends_on:
+      - django
+    volumes:
+      - static_files:/static:ro
+    ports:
+      - "80:80"
+      - "1935:1935"
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  postgres_data:
+  static_files:

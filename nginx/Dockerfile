@@ -16,6 +16,6 @@ COPY nginx/docker-entrypoint.sh /docker-entrypoint.sh
 COPY rtmp-push/ /rtmp-push/
 RUN chmod +x /docker-entrypoint.sh /rtmp-push/push.sh /rtmp-push/stop.sh
 
-EXPOSE 1935 8080
+EXPOSE 80 1935 8080
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

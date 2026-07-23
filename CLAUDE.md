@@ -15,7 +15,7 @@ The codebase is a small Django project: an `accounts` app (custom user model + a
 - **Per-user restream config (implemented)**: a logged-in user creates any number of `Stream` ingest points, and for each one specifies one or more `Rtmp` restream destinations (typically social media RTMP publish URLs/keys). Each destination has a user-assigned name (`socialmedia_name`). See Architecture below.
 - **RTMP ingest + relay (implemented)**: users actually stream in and get relayed out — see Architecture below.
 - **Stream lifecycle/ops features**: ability to restart a broadcast, view per-stream statistics, and view overall server load — not built yet (the `push.sh`/`stop.sh` PID-file mechanism is a natural hook point for a future restart feature, but no UI/command uses it yet).
-- **Deployment target**: the app is meant to ship as a Docker image so it can be installed on a Debian server via Docker. `nginx/Dockerfile` is the first piece of that (nginx-rtmp only); a full docker-compose wiring Django+Postgres+nginx together doesn't exist yet.
+- **Deployment target (implemented locally)**: `docker-compose.yml` wires Django+Postgres+nginx together — see Architecture below. Production hardening (gunicorn instead of `runserver`, TLS, whitenoise) is intentionally not done yet.
 
 ## Commands
 
@@ -30,6 +30,11 @@ poetry run python manage.py test                   # run the full test suite
 poetry run python manage.py test crud               # run tests for one app only (accounts, crud)
 poetry run python manage.py test crud.tests.<TestCase>.<test_method>  # run a single test
 poetry run black .                                  # format code (black is a declared dependency)
+
+docker compose up -d --build                        # run the full stack (nginx + django + postgres)
+docker compose logs -f django                        # follow Django logs (incl. console-backend emails)
+docker compose exec django python manage.py <cmd>    # run a management command inside the container
+docker compose down -v                                # stop and wipe compose volumes (postgres data, static files)
 ```
 
 A `.env` file (see `.env_example` for the required keys) must exist before running any `manage.py` command, since `config/settings.py` loads env vars via `python-dotenv` and reads `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` (comma-separated), `DB_NAME`/`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_PORT` for PostgreSQL, and optional `EMAIL_*`/`DEFAULT_FROM_EMAIL`/`RTMP_SERVER_HOST`/`RTMP_APP`/`RTMP_HOOK_SECRET` vars (see below). There is no fallback/default DB — Postgres must be reachable for any command that touches models.
@@ -37,6 +42,8 @@ A `.env` file (see `.env_example` for the required keys) must exist before runni
 **Email in dev**: leave `EMAIL_HOST` unset in `.env` and outgoing mail (registration/approval notices) prints to the console instead of requiring SMTP.
 
 **Note on `AUTH_USER_MODEL`**: it points at `accounts.User`. If you ever need to reset the dev DB after model changes to `accounts`, remember Django cannot swap `AUTH_USER_MODEL` on top of an already-migrated default `auth.User` — drop and recreate the dev database rather than trying to migrate in place.
+
+**One `.env` for both bare-metal and Docker Compose**: values that differ between the two (`DB_HOST`, `ALLOWED_HOSTS`) are overridden per-service in `docker-compose.yml` rather than requiring a second env file — don't add a `DB_HOST=db`/`ALLOWED_HOSTS=...,django` to `.env` itself, that would break plain `manage.py runserver`.
 
 ## Architecture
 
@@ -53,5 +60,7 @@ A `.env` file (see `.env_example` for the required keys) must exist before runni
 - `nginx/` — Docker image for nginx-rtmp (not installable as a stock package; built from `debian:bookworm-slim` + the `libnginx-mod-rtmp` apt package). `nginx/conf/nginx.conf.template` is rendered by `nginx/docker-entrypoint.sh` via `envsubst` (`DJANGO_HOOK_BASE_URL`, `RTMP_HOOK_SECRET` env vars) before nginx starts. Build from the **repo root** (not `nginx/`) so the build context includes `rtmp-push/`: `docker build -f nginx/Dockerfile -t restream-nginx .`. Deliberately `worker_processes 1` — nginx-rtmp connections/stats aren't shared across workers, so `/stat` on a multi-worker setup only reflects whichever worker handled a given request.
 - `rtmp-push/` — `push.sh`/`stop.sh`, invoked by nginx-rtmp's `exec_publish`/`exec_publish_done` (not run directly). `push.sh` fetches the destination list from `stream_destinations_hook` and launches one `ffmpeg -c copy` process fanning out to all destinations, tracking its PID in `/tmp/rtmp-push/<stream_key>.pid` for `stop.sh` to kill on publish end. Builds the ffmpeg argv via `set --` rather than `eval`/`sh -c` on purpose — destination URLs/keys come from user input (`Rtmp` fields) and must never be shell-interpreted (command injection).
 - Templates live under `<app>/templates/<app>/` following Django's app-namespaced template convention (no shared/base template exists yet).
+- `Dockerfile`/`docker-entrypoint.sh` (repo root) — the Django image (`python:3.13-slim` + Poetry, `POETRY_VIRTUALENVS_CREATE=false`). The entrypoint waits for Postgres to accept connections (plain `depends_on` only waits for container start, not DB readiness), then runs `migrate`, `collectstatic`, and `runserver 0.0.0.0:8000`. `.dockerignore` excludes `.env` — never remove that exclusion, `COPY . .` would otherwise bake secrets into the image layer.
+- `docker-compose.yml` — `db` (`postgres:16-alpine`, not exposed to the host to avoid clashing with a locally-running Postgres on 5432), `django` (builds the root `Dockerfile`), `nginx` (builds `nginx/Dockerfile`, now also reverse-proxies HTTP: a second `server { listen 80; }` block in `nginx/conf/nginx.conf.template` proxies `/` to `http://django:8000` and serves `/static/` directly from a shared `static_files` volume populated by `collectstatic`). nginx's `on_publish`/`push.sh` hooks reach Django at `http://django:8000` — Django's `ALLOWED_HOSTS` gets `django` appended in compose (see the `.env` note above) since that hostname never appears in the browser-facing `Host` header.
 
 When adding new apps or restream/push functionality, follow the existing pattern: a Django app with its own `urls.py` included from `config/urls.py`, and app-namespaced templates.
