@@ -153,3 +153,7 @@ RTMP_HOOK_SECRET = os.getenv("RTMP_HOOK_SECRET", "")
 # Откуда брать /stat nginx-rtmp для статистики потоков. Пусто = статистика
 # недоступна (например, в голом dev без поднятого nginx-контейнера).
 NGINX_STAT_URL = os.getenv("NGINX_STAT_URL", "")
+
+# Базовый URL control-модуля nginx-rtmp (без /control/...) для рестарта
+# трансляции. Пусто = рестарт недоступен.
+NGINX_CONTROL_URL = os.getenv("NGINX_CONTROL_URL", "")

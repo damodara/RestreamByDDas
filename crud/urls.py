@@ -10,6 +10,9 @@ urlpatterns = [
     path("streams/<int:stream_id>/", views.stream_detail, name="stream_detail"),
     path("streams/<int:stream_id>/delete/", views.stream_delete, name="stream_delete"),
     path(
+        "streams/<int:stream_id>/restart/", views.stream_restart, name="stream_restart"
+    ),
+    path(
         "streams/<int:stream_id>/destinations/create/",
         views.destination_create,
         name="destination_create",

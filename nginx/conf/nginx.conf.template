@@ -41,6 +41,10 @@ http {
         location /stat {
             rtmp_stat all;
         }
+
+        location /control {
+            rtmp_control all;
+        }
     }
 
     server {

@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -7,6 +8,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from crud.forms import DestinationForm, StreamForm
 from crud.models import Rtmp, Stream
+from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_stream_stats
 from crud.server_load import get_server_load
 
@@ -51,6 +53,17 @@ def stream_detail(request, stream_id):
     return render(
         request, "crud/stream_detail.html", {"stream": stream, "stats": stats}
     )
+
+
+@login_required
+@require_POST
+def stream_restart(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    if restart_stream(stream.stream_key):
+        messages.success(request, "Сигнал на перезапуск отправлен.")
+    else:
+        messages.error(request, "Не удалось перезапустить — инфраструктура недоступна.")
+    return redirect("crud:stream_detail", stream_id=stream.pk)
 
 
 @login_required

@@ -5,6 +5,7 @@ from django.urls import reverse
 
 from accounts.models import User
 from crud.models import Rtmp, Stream
+from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_stream_stats
 from crud.server_load import get_server_load
 
@@ -294,3 +295,73 @@ class StreamStatsViewTests(TestCase):
         response = self.client.get(reverse("crud:index"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Нагрузка сервера")
+
+
+CONTROL_URL = "http://nginx-test"
+
+
+class NginxControlTests(TestCase):
+    @override_settings(NGINX_CONTROL_URL="")
+    def test_returns_false_when_not_configured(self):
+        with patch("crud.nginx_control.urllib.request.urlopen") as mock_urlopen:
+            self.assertFalse(restart_stream("some-key"))
+            mock_urlopen.assert_not_called()
+
+    @override_settings(NGINX_CONTROL_URL=CONTROL_URL)
+    def test_returns_false_when_unreachable(self):
+        with patch("crud.nginx_control.urllib.request.urlopen", side_effect=OSError):
+            self.assertFalse(restart_stream("some-key"))
+
+    @override_settings(NGINX_CONTROL_URL=CONTROL_URL)
+    def test_returns_true_on_success(self):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_control.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertTrue(restart_stream("some-key"))
+
+
+class StreamRestartViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="restartowner",
+            email="restartowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="restartother",
+            email="restartother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Restart stream")
+
+    def test_anonymous_redirects_to_login(self):
+        url = reverse("crud:stream_restart", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_restart", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_owner_sees_success_message(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_restart", args=[self.stream.id])
+        with patch("crud.views.restart_stream", return_value=True):
+            response = self.client.post(url, follow=True)
+        self.assertContains(response, "Сигнал на перезапуск отправлен")
+
+    def test_owner_sees_failure_message(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_restart", args=[self.stream.id])
+        with patch("crud.views.restart_stream", return_value=False):
+            response = self.client.post(url, follow=True)
+        self.assertContains(response, "Не удалось перезапустить")

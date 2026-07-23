@@ -7,6 +7,14 @@
 <body>
 	<h1>{{ stream.name }}</h1>
 
+	{% if messages %}
+		<ul>
+			{% for message in messages %}
+				<li>{{ message }}</li>
+			{% endfor %}
+		</ul>
+	{% endif %}
+
 	{% if stream.publish_url %}
 		<p>Ссылка на публикацию: <code>{{ stream.publish_url }}</code></p>
 	{% else %}
@@ -26,6 +34,12 @@
 			Отдано: {{ stats.bytes_out|filesizeformat }} ({{ stats.bw_out }} bit/s)
 		</p>
 	{% endif %}
+
+	<form method="post" action="{% url 'crud:stream_restart' stream.id %}">
+		{% csrf_token %}
+		<button type="submit">Перезапустить трансляцию</button>
+	</form>
+	<p><small>Сработает, только если стриминговый клиент (например OBS) сам переподключается после разрыва — так делает большинство энкодеров по умолчанию.</small></p>
 
 	<p><a href="{% url 'crud:stream_delete' stream.id %}">Удалить точку приёма</a></p>
 
