@@ -45,3 +45,7 @@ class Rtmp(models.Model):
 
     def __str__(self):
         return self.socialmedia_name
+
+    @property
+    def push_url(self):
+        return f"{self.socialmedia_rtmp_link.rstrip('/')}/{self.socialmedia_rtmp_key}"

@@ -14,7 +14,7 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -143,3 +143,8 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 
 RTMP_SERVER_HOST = os.getenv("RTMP_SERVER_HOST", "")
 RTMP_APP = os.getenv("RTMP_APP", "live")
+
+# Общий секрет, которым nginx-rtmp (on_publish) и rtmp-push/push.sh
+# подтверждают Django, что запрос пришёл от нашей RTMP-инфраструктуры.
+# Пустое значение = хуки всегда отказывают (fail closed).
+RTMP_HOOK_SECRET = os.getenv("RTMP_HOOK_SECRET", "")

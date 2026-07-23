@@ -1,8 +1,17 @@
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET, require_POST
 
 from crud.forms import DestinationForm, StreamForm
 from crud.models import Rtmp, Stream
+
+
+def _hook_authorized(request):
+    secret = request.GET.get("secret", "")
+    return bool(settings.RTMP_HOOK_SECRET) and secret == settings.RTMP_HOOK_SECRET
 
 
 @login_required
@@ -90,3 +99,27 @@ def destination_delete(request, destination_id):
         "crud/confirm_delete.html",
         {"object": destination, "object_label": destination.socialmedia_name},
     )
+
+
+@csrf_exempt
+@require_POST
+def on_publish_hook(request):
+    if not _hook_authorized(request):
+        return HttpResponseForbidden()
+    stream_key = request.POST.get("name", "")
+    if Stream.objects.filter(stream_key=stream_key).exists():
+        return HttpResponse(status=200)
+    return HttpResponseForbidden()
+
+
+@require_GET
+def stream_destinations_hook(request, stream_key):
+    if not _hook_authorized(request):
+        return HttpResponseForbidden()
+    stream = Stream.objects.filter(stream_key=stream_key).first()
+    if stream is None:
+        return JsonResponse([], safe=False)
+    destinations = [
+        {"push_url": destination.push_url} for destination in stream.destinations.all()
+    ]
+    return JsonResponse(destinations, safe=False)

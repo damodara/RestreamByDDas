@@ -1,8 +1,10 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from accounts.models import User
 from crud.models import Rtmp, Stream
+
+HOOK_SECRET = "test-hook-secret"
 
 
 class CrudOwnershipTests(TestCase):
@@ -103,3 +105,64 @@ class CrudOwnershipTests(TestCase):
         self.client.post(delete_url)
         self.assertFalse(Stream.objects.filter(pk=self.stream.id).exists())
         self.assertFalse(Rtmp.objects.filter(pk=self.destination.id).exists())
+
+
+@override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)
+class RtmpHooksTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="owner",
+            email="owner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Моя точка")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def test_on_publish_rejects_without_valid_secret(self):
+        url = reverse("crud:on_publish_hook")
+        response = self.client.post(url, {"name": self.stream.stream_key})
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.post(
+            f"{url}?secret=wrong", {"name": self.stream.stream_key}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_on_publish_rejects_unknown_stream_key(self):
+        url = reverse("crud:on_publish_hook")
+        response = self.client.post(
+            f"{url}?secret={HOOK_SECRET}", {"name": "no-such-key"}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_on_publish_accepts_known_stream_key(self):
+        url = reverse("crud:on_publish_hook")
+        response = self.client.post(
+            f"{url}?secret={HOOK_SECRET}", {"name": self.stream.stream_key}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_destinations_hook_returns_push_urls(self):
+        url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
+        response = self.client.get(f"{url}?secret={HOOK_SECRET}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [{"push_url": "rtmp://vk.com/live/vk-key"}])
+
+    def test_destinations_hook_empty_for_unknown_stream(self):
+        url = reverse("crud:stream_destinations_hook", args=["no-such-key"])
+        response = self.client.get(f"{url}?secret={HOOK_SECRET}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_destinations_hook_rejects_bad_secret(self):
+        url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 403)

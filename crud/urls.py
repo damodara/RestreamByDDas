@@ -24,4 +24,10 @@ urlpatterns = [
         views.destination_delete,
         name="destination_delete",
     ),
+    path("rtmp-hooks/on-publish/", views.on_publish_hook, name="on_publish_hook"),
+    path(
+        "rtmp-hooks/destinations/<str:stream_key>/",
+        views.stream_destinations_hook,
+        name="stream_destinations_hook",
+    ),
 ]
