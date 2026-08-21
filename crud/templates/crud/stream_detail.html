@@ -1,69 +1,95 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-	<meta charset="UTF-8">
-	<title>{{ stream.name }}</title>
-</head>
-<body>
+{% extends "crud/base.html" %}
+
+{% block title %}{{ stream.name }} — RestreamByDDas{% endblock %}
+
+{% block content %}
 	<h1>{{ stream.name }}</h1>
 
-	{% if messages %}
-		<ul>
-			{% for message in messages %}
-				<li>{{ message }}</li>
-			{% endfor %}
-		</ul>
-	{% endif %}
+	<div class="card">
+		<div class="publish-urls">
+			<div class="row">
+				<span class="proto">RTMP</span>
+				{% if stream.publish_url %}
+					<code>{{ stream.publish_url }}</code>
+				{% else %}
+					<span class="unavailable">не настроено (не задан RTMP_SERVER_HOST)</span>
+				{% endif %}
+			</div>
+			<div class="row">
+				<span class="proto">SRT</span>
+				{% if stream.srt_publish_url %}
+					<code>{{ stream.srt_publish_url }}</code>
+				{% else %}
+					<span class="unavailable">не настроено (не задан SRT_SERVER_HOST)</span>
+				{% endif %}
+			</div>
+			<div class="row">
+				<span class="proto">Ключ</span>
+				<code>{{ stream.stream_key }}</code>
+			</div>
+		</div>
+	</div>
 
-	{% if stream.publish_url %}
-		<p>RTMP: <code>{{ stream.publish_url }}</code></p>
-	{% else %}
-		<p>Ссылка RTMP пока не настроена (не задан RTMP_SERVER_HOST).</p>
-	{% endif %}
-	{% if stream.srt_publish_url %}
-		<p>SRT: <code>{{ stream.srt_publish_url }}</code></p>
-	{% else %}
-		<p>Ссылка SRT пока не настроена (не задан SRT_SERVER_HOST).</p>
-	{% endif %}
-	<p>Ключ потока: <code>{{ stream.stream_key }}</code></p>
+	<div class="card">
+		<h2 style="margin-top:0">
+			Статистика
+			{% if stats and stats.live %}
+				<span class="badge live">в эфире</span>
+			{% else %}
+				<span class="badge offline">не в эфире</span>
+			{% endif %}
+		</h2>
+		{% if stats is None %}
+			<p class="empty-state">Статистика недоступна.</p>
+		{% elif not stats.live %}
+			<p class="empty-state">Поток сейчас не идёт.</p>
+		{% else %}
+			<div class="stats-grid">
+				<div class="metric">
+					<div class="value">{{ stats.uptime_display }}</div>
+					<div class="label">В эфире</div>
+				</div>
+				<div class="metric">
+					<div class="value">{{ stats.bytes_in|filesizeformat }}</div>
+					<div class="label">Принято ({{ stats.bw_in }} bit/s)</div>
+				</div>
+				<div class="metric">
+					<div class="value">{{ stats.bytes_out|filesizeformat }}</div>
+					<div class="label">Отдано ({{ stats.bw_out }} bit/s)</div>
+				</div>
+			</div>
+		{% endif %}
 
-	<h2>Статистика</h2>
-	{% if stats is None %}
-		<p>Статистика недоступна.</p>
-	{% elif not stats.live %}
-		<p>Поток сейчас не идёт.</p>
-	{% else %}
-		<p>
-			В эфире: {{ stats.uptime_display }}<br>
-			Принято: {{ stats.bytes_in|filesizeformat }} ({{ stats.bw_in }} bit/s)<br>
-			Отдано: {{ stats.bytes_out|filesizeformat }} ({{ stats.bw_out }} bit/s)
-		</p>
-	{% endif %}
-
-	<form method="post" action="{% url 'crud:stream_restart' stream.id %}">
-		{% csrf_token %}
-		<button type="submit">Перезапустить трансляцию</button>
-	</form>
-	<p><small>Сработает, только если стриминговый клиент (например OBS) сам переподключается после разрыва — так делает большинство энкодеров по умолчанию.</small></p>
-
-	<p><a href="{% url 'crud:stream_delete' stream.id %}">Удалить точку приёма</a></p>
+		<div class="actions-row">
+			<form method="post" action="{% url 'crud:stream_restart' stream.id %}">
+				{% csrf_token %}
+				<button type="submit" class="button secondary">Перезапустить трансляцию</button>
+			</form>
+		</div>
+		<p class="hint">Сработает, только если стриминговый клиент (например OBS) сам переподключается после разрыва — так делает большинство энкодеров по умолчанию. Также нужно после добавления/изменения destination-ов, чтобы они подхватились.</p>
+	</div>
 
 	<h2>Куда рестримим</h2>
-	<p><a href="{% url 'crud:destination_create' stream.id %}">Добавить destination</a></p>
+	<div class="actions-row">
+		<a class="button" href="{% url 'crud:destination_create' stream.id %}">+ Добавить destination</a>
+	</div>
+
 	{% if stream.destinations.all %}
-		<ul>
+		<ul class="destination-list">
 			{% for destination in stream.destinations.all %}
 				<li>
-					{{ destination.socialmedia_name }}
-					(<a href="{% url 'crud:destination_update' destination.id %}">изменить</a> |
-					<a href="{% url 'crud:destination_delete' destination.id %}">удалить</a>)
+					<span class="name">{{ destination.socialmedia_name }}</span>
+					<span class="actions">
+						<a href="{% url 'crud:destination_update' destination.id %}">изменить</a>
+						<a href="{% url 'crud:destination_delete' destination.id %}">удалить</a>
+					</span>
 				</li>
 			{% endfor %}
 		</ul>
 	{% else %}
-		<p>Destination-ов пока нет.</p>
+		<p class="empty-state">Destination-ов пока нет.</p>
 	{% endif %}
 
-	<p><a href="{% url 'crud:index' %}">Назад к списку</a></p>
-</body>
-</html>
+	<p style="margin-top:32px"><a href="{% url 'crud:stream_delete' stream.id %}">Удалить точку приёма</a></p>
+	<p><a href="{% url 'crud:index' %}">← Назад к списку</a></p>
+{% endblock %}

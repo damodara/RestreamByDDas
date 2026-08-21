@@ -1,15 +1,15 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-	<meta charset="UTF-8">
-	<title>Новая точка приёма</title>
-</head>
-<body>
+{% extends "crud/base.html" %}
+
+{% block title %}Новая точка приёма — RestreamByDDas{% endblock %}
+
+{% block content %}
 	<h1>Новая точка приёма</h1>
-	<form method="post">
-		{% csrf_token %}
-		{{ form.as_p }}
-		<button type="submit">Создать</button>
-	</form>
-</body>
-</html>
+	<div class="card">
+		<form method="post">
+			{% csrf_token %}
+			{{ form.as_p }}
+			<button type="submit">Создать</button>
+		</form>
+	</div>
+	<p><a href="{% url 'crud:index' %}">← Назад к списку</a></p>
+{% endblock %}

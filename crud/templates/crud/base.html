@@ -1,0 +1,36 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{% block title %}RestreamByDDas{% endblock %}</title>
+	<link rel="stylesheet" href="{% static 'crud/style.css' %}">
+</head>
+<body>
+	<div class="topbar">
+		<a class="brand" href="{% url 'crud:index' %}">RestreamByDDas</a>
+		{% if user.is_authenticated %}
+			<div class="user-info">
+				<span>{{ user.username }}</span>
+				<form method="post" action="{% url 'accounts:logout' %}">
+					{% csrf_token %}
+					<button type="submit" class="link-button">Выйти</button>
+				</form>
+			</div>
+		{% endif %}
+	</div>
+
+	<div class="container">
+		{% if messages %}
+			<ul class="messages">
+				{% for message in messages %}
+					<li class="{{ message.tags }}">{{ message }}</li>
+				{% endfor %}
+			</ul>
+		{% endif %}
+
+		{% block content %}{% endblock %}
+	</div>
+</body>
+</html>

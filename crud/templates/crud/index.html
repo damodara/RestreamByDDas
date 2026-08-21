@@ -1,22 +1,34 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-	<meta charset="UTF-8">
-	<title>Мои точки приёма</title>
-</head>
-<body>
+{% extends "crud/base.html" %}
+
+{% block title %}Мои точки приёма — RestreamByDDas{% endblock %}
+
+{% block content %}
 	<h1>Мои точки приёма</h1>
 
-	<h2>Нагрузка сервера</h2>
-	<p>
-		Load average: {{ server_load.load1|floatformat:2 }} / {{ server_load.load5|floatformat:2 }} / {{ server_load.load15|floatformat:2 }}<br>
-		Память: {% if server_load.mem_used_percent is not None %}{{ server_load.mem_used_percent }}%{% else %}н/д{% endif %}<br>
-		Диск: {% if server_load.disk_used_percent is not None %}{{ server_load.disk_used_percent }}%{% else %}н/д{% endif %}
-	</p>
+	<div class="card">
+		<h2 style="margin-top:0">Нагрузка сервера</h2>
+		<div class="load-grid">
+			<div class="metric">
+				<div class="value">{{ server_load.load1|floatformat:2 }} / {{ server_load.load5|floatformat:2 }} / {{ server_load.load15|floatformat:2 }}</div>
+				<div class="label">Load average</div>
+			</div>
+			<div class="metric">
+				<div class="value">{% if server_load.mem_used_percent is not None %}{{ server_load.mem_used_percent }}%{% else %}н/д{% endif %}</div>
+				<div class="label">Память</div>
+			</div>
+			<div class="metric">
+				<div class="value">{% if server_load.disk_used_percent is not None %}{{ server_load.disk_used_percent }}%{% else %}н/д{% endif %}</div>
+				<div class="label">Диск</div>
+			</div>
+		</div>
+	</div>
 
-	<p><a href="{% url 'crud:stream_create' %}">Создать точку приёма</a></p>
+	<div class="actions-row">
+		<a class="button" href="{% url 'crud:stream_create' %}">+ Создать точку приёма</a>
+	</div>
+
 	{% if streams %}
-		<ul>
+		<ul class="stream-list">
 			{% for stream in streams %}
 				<li>
 					<a href="{% url 'crud:stream_detail' stream.id %}">{{ stream.name }}</a>
@@ -24,7 +36,6 @@
 			{% endfor %}
 		</ul>
 	{% else %}
-		<p>Точек приёма пока нет.</p>
+		<p class="empty-state">Точек приёма пока нет.</p>
 	{% endif %}
-</body>
-</html>
+{% endblock %}
