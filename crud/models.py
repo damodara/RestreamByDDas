@@ -48,9 +48,10 @@ class Rtmp(models.Model):
     )
     socialmedia_url = models.URLField(verbose_name="Адрес для просмотра")
     socialmedia_rtmp_link = models.CharField(max_length=100, verbose_name="RTMP адрес")
-    socialmedia_rtmp_key = models.CharField(
-        max_length=100, verbose_name="RTMP ключ", unique=True
-    )
+    socialmedia_rtmp_key = models.CharField(max_length=100, verbose_name="RTMP ключ")
+
+    class Meta:
+        unique_together = [("stream", "socialmedia_rtmp_key")]
 
     def __str__(self):
         return self.socialmedia_name

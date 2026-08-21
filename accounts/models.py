@@ -15,6 +15,3 @@ class User(AbstractUser):
         default=ApprovalStatus.PENDING,
     )
     approved_at = models.DateTimeField(null=True, blank=True)
-    approved_by = models.ForeignKey(
-        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
-    )

@@ -121,6 +121,49 @@ class CrudOwnershipTests(TestCase):
         self.client.post(delete_url)
         self.assertFalse(Rtmp.objects.filter(pk=destination.id).exists())
 
+    def test_duplicate_rtmp_key_within_same_stream_rejected(self):
+        self.login(self.user)
+        create_url = reverse("crud:destination_create", args=[self.stream.id])
+        response = self.client.post(
+            create_url,
+            {
+                "socialmedia_name": "VK Backup",
+                "socialmedia_url": "https://vk.com/watch",
+                "socialmedia_rtmp_link": "rtmp://vk.com/live",
+                "socialmedia_rtmp_key": "vk-key",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "уже используется")
+        self.assertEqual(
+            Rtmp.objects.filter(
+                stream=self.stream, socialmedia_rtmp_key="vk-key"
+            ).count(),
+            1,
+        )
+
+    def test_same_rtmp_key_allowed_across_different_streams(self):
+        self.login(self.user)
+        other_stream = Stream.objects.create(owner=self.user, name="Вторая точка")
+        create_url = reverse("crud:destination_create", args=[other_stream.id])
+        response = self.client.post(
+            create_url,
+            {
+                "socialmedia_name": "VK",
+                "socialmedia_url": "https://vk.com/watch",
+                "socialmedia_rtmp_link": "rtmp://vk.com/live",
+                "socialmedia_rtmp_key": "vk-key",
+            },
+        )
+        self.assertRedirects(
+            response, reverse("crud:stream_detail", args=[other_stream.pk])
+        )
+        self.assertTrue(
+            Rtmp.objects.filter(
+                stream=other_stream, socialmedia_rtmp_key="vk-key"
+            ).exists()
+        )
+
     def test_other_user_cannot_modify_destination(self):
         self.login(self.other_user)
         update_url = reverse("crud:destination_update", args=[self.destination.id])

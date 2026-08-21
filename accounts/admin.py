@@ -9,10 +9,10 @@ class UserAdmin(DjangoUserAdmin):
     fieldsets = DjangoUserAdmin.fieldsets + (
         (
             "Подтверждение регистрации",
-            {"fields": ("approval_status", "approved_at", "approved_by")},
+            {"fields": ("approval_status", "approved_at")},
         ),
     )
-    readonly_fields = ("approved_at", "approved_by")
+    readonly_fields = ("approved_at",)
 
 
 admin.site.register(User, UserAdmin)

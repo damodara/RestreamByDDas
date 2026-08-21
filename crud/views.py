@@ -85,11 +85,9 @@ def stream_delete(request, stream_id):
 def destination_create(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     if request.method == "POST":
-        form = DestinationForm(request.POST)
+        form = DestinationForm(request.POST, instance=Rtmp(stream=stream))
         if form.is_valid():
-            destination = form.save(commit=False)
-            destination.stream = stream
-            destination.save()
+            form.save()
             return redirect("crud:stream_detail", stream_id=stream.pk)
     else:
         form = DestinationForm()
