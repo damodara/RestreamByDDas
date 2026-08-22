@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir poetry
 WORKDIR /app
 
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --no-root
+RUN poetry install --no-root --without dev
 
 COPY . .
 RUN chmod +x docker-entrypoint.sh
