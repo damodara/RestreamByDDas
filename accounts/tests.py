@@ -8,7 +8,11 @@ from django.utils.http import urlsafe_base64_encode
 
 from accounts.models import User
 from accounts.tokens import make_decision_token
-from accounts.views import LOGIN_THROTTLE_LIMIT, REGISTER_THROTTLE_LIMIT
+from accounts.views import (
+    LOGIN_THROTTLE_LIMIT,
+    PASSWORD_RESET_THROTTLE_LIMIT,
+    REGISTER_THROTTLE_LIMIT,
+)
 
 
 class RegistrationApprovalFlowTests(TestCase):
@@ -123,6 +127,7 @@ class LoginThrottleTests(TestCase):
 
 class PasswordResetFlowTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(
             username="resetowner",
             email="resetowner@example.com",
@@ -194,3 +199,40 @@ class RegisterThrottleTests(TestCase):
         response = self.register("freshuser")
         self.assertContains(response, "Заявка отправлена")
         self.assertTrue(User.objects.filter(username="freshuser").exists())
+
+
+class PasswordResetThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="resetthrottleowner",
+            email="resetthrottleowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def request_reset(self, email="resetthrottleowner@example.com"):
+        return self.client.post(reverse("accounts:password_reset"), {"email": email})
+
+    def test_blocks_after_repeated_requests(self):
+        for _ in range(PASSWORD_RESET_THROTTLE_LIMIT):
+            self.request_reset()
+        mail.outbox.clear()
+        response = self.request_reset()
+        self.assertContains(response, "Слишком много запросов на сброс пароля")
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_blocks_even_for_unknown_email(self):
+        # Троттлинг считает попытки, а не успешные совпадения email — иначе
+        # эндпоинт можно было бы использовать без ограничений для перебора
+        # зарегистрированных адресов.
+        for _ in range(PASSWORD_RESET_THROTTLE_LIMIT):
+            self.request_reset(email="nobody@example.com")
+        response = self.request_reset(email="nobody@example.com")
+        self.assertContains(response, "Слишком много запросов на сброс пароля")
+
+    def test_under_limit_allows_request(self):
+        response = self.request_reset()
+        self.assertRedirects(response, reverse("accounts:password_reset_done"))
+        self.assertEqual(len(mail.outbox), 1)

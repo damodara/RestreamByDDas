@@ -16,7 +16,7 @@ urlpatterns = [
     path("decision/<str:action>/<str:token>/", views.admin_decision, name="decision"),
     path(
         "password-reset/",
-        auth_views.PasswordResetView.as_view(
+        views.ThrottledPasswordResetView.as_view(
             template_name="accounts/password_reset_form.html",
             email_template_name="accounts/email/password_reset_email.txt",
             subject_template_name="accounts/email/password_reset_subject.txt",

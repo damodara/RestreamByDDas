@@ -1,4 +1,4 @@
-from django.contrib.auth.views import LoginView
+from django.contrib.auth.views import LoginView, PasswordResetView
 from django.core.cache import cache
 from django.shortcuts import render
 from django.utils import timezone
@@ -22,6 +22,13 @@ LOGIN_THROTTLE_WINDOW = 300  # 5 минут
 # пользователям (спам администраторам, не только нагрузка на форму).
 REGISTER_THROTTLE_LIMIT = 3
 REGISTER_THROTTLE_WINDOW = 3600  # 1 час
+
+# И для запроса сброса пароля — PasswordResetForm всегда отвечает одинаково
+# (страница "done"), даже если email не зарегистрирован, так что успех тут
+# не показатель: считаем каждую попытку, иначе можно засыпать письмами
+# любого пользователя, зная только его email.
+PASSWORD_RESET_THROTTLE_LIMIT = 3
+PASSWORD_RESET_THROTTLE_WINDOW = 3600  # 1 час
 
 
 class ThrottledLoginView(LoginView):
@@ -75,6 +82,26 @@ def register(request):
     else:
         form = RegistrationForm()
     return render(request, "accounts/register.html", {"form": form})
+
+
+class ThrottledPasswordResetView(PasswordResetView):
+    def _cache_key(self):
+        return (
+            f"password-reset-attempts:{self.request.META.get('REMOTE_ADDR', 'unknown')}"
+        )
+
+    def post(self, request, *args, **kwargs):
+        key = self._cache_key()
+        if cache.get(key, 0) >= PASSWORD_RESET_THROTTLE_LIMIT:
+            form = self.get_form()
+            form.add_error(
+                None,
+                "Слишком много запросов на сброс пароля с этого адреса. "
+                "Попробуйте снова через час.",
+            )
+            return self.render_to_response(self.get_context_data(form=form))
+        cache.set(key, cache.get(key, 0) + 1, PASSWORD_RESET_THROTTLE_WINDOW)
+        return super().post(request, *args, **kwargs)
 
 
 def admin_decision(request, action, token):
