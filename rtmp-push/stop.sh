@@ -4,12 +4,11 @@
 set -eu
 
 STREAM_KEY="$1"
-PID_FILE="/tmp/rtmp-push/${STREAM_KEY}.pid"
+PID_DIR="/tmp/rtmp-push/${STREAM_KEY}"
 
-if [ -f "$PID_FILE" ]; then
-    PID=$(cat "$PID_FILE")
-    rm -f "$PID_FILE"
-
+kill_and_wait() {
+    PID="$1"
+    LABEL="$2"
     # nginx-rtmp не рвёт соединение push-ffmpeg с "live"-app принудительно —
     # оно просто перестаёт получать данные, и ffmpeg, простаивая на чтении
     # этого входа, иногда не реагирует на TERM (подтверждено живым тестом:
@@ -20,11 +19,24 @@ if [ -f "$PID_FILE" ]; then
         while kill -0 "$PID" 2>/dev/null; do
             i=$((i + 1))
             if [ "$i" -ge 10 ]; then
-                echo "stop.sh: ${STREAM_KEY} (pid ${PID}) не завершился по TERM, добиваю KILL" >&2
+                echo "stop.sh: ${LABEL} (pid ${PID}) не завершился по TERM, добиваю KILL" >&2
                 kill -9 "$PID" 2>/dev/null || true
                 break
             fi
             sleep 0.5
         done
     fi
+}
+
+if [ -d "$PID_DIR" ]; then
+    # Удаляем только .pid — .log за каждую дестинацию оставляем: следующая
+    # публикация того же stream_key перезапишет их (push.sh пишет по тем же
+    # индексам), а до этого по ним можно посмотреть, что пошло не так,
+    # уже после того как стрим закончился.
+    for PID_FILE in "$PID_DIR"/*.pid; do
+        [ -f "$PID_FILE" ] || continue
+        PID=$(cat "$PID_FILE")
+        rm -f "$PID_FILE"
+        kill_and_wait "$PID" "${STREAM_KEY}/$(basename "$PID_FILE")"
+    done
 fi
