@@ -311,6 +311,11 @@ code {
 	color: var(--offline-text);
 }
 
+.badge.error {
+	background: var(--error-bg);
+	color: var(--error-text);
+}
+
 .stats-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -347,6 +352,14 @@ code {
 	border-radius: var(--radius);
 	padding: 10px 14px;
 	background: var(--bg);
+}
+
+.destination-list .name-group {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	min-width: 0;
 }
 
 .destination-list .name {

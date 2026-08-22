@@ -78,7 +78,16 @@
 		<ul class="destination-list">
 			{% for destination in stream.destinations.all %}
 				<li>
-					<span class="name">{{ destination.socialmedia_name }}</span>
+					<span class="name-group">
+						<span class="name">{{ destination.socialmedia_name }}</span>
+						{% if stats and stats.live %}
+							{% if destination.push_status == "live" %}
+								<span class="badge live">в эфире</span>
+							{% elif destination.push_status == "error" %}
+								<span class="badge error">ошибка</span>
+							{% endif %}
+						{% endif %}
+					</span>
 					<span class="actions">
 						<a href="{% url 'crud:destination_update' destination.id %}">изменить</a>
 						<a href="{% url 'crud:destination_delete' destination.id %}">удалить</a>

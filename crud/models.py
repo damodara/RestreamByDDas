@@ -57,6 +57,24 @@ class Rtmp(models.Model):
     # проверяется в clean() ниже, расшифровкой и сравнением в Python.
     socialmedia_rtmp_key = EncryptedCharField(max_length=500, verbose_name="RTMP ключ")
 
+    class PushStatus(models.TextChoices):
+        UNKNOWN = "unknown", "—"
+        LIVE = "live", "В эфире"
+        ERROR = "error", "Ошибка"
+        STOPPED = "stopped", "Остановлено"
+
+    # Обновляется push.sh через destination_status_hook, а не считается на
+    # лету — в отличие от статуса самого потока (nginx-rtmp /stat, см.
+    # nginx_stat.py), у Django нет способа заглянуть в /tmp/rtmp-push
+    # nginx-контейнера, чтобы проверить состояние push-процесса напрямую.
+    # Может быть устаревшим, если nginx упал грубо, не успев отрапортовать
+    # "stopped"/"error" — stream_detail.html подстраховывается, показывая
+    # это поле только пока сам поток live по /stat.
+    push_status = models.CharField(
+        max_length=10, choices=PushStatus.choices, default=PushStatus.UNKNOWN
+    )
+    push_status_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return self.socialmedia_name
 

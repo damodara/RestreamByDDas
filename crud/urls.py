@@ -34,4 +34,9 @@ urlpatterns = [
         name="stream_destinations_hook",
     ),
     path("rtmp-hooks/srt-auth/", views.srt_auth_hook, name="srt_auth_hook"),
+    path(
+        "rtmp-hooks/destination-status/",
+        views.destination_status_hook,
+        name="destination_status_hook",
+    ),
 ]

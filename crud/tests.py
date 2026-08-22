@@ -230,7 +230,10 @@ class RtmpHooksTests(TestCase):
         url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
         response = self.client.get(f"{url}?secret={HOOK_SECRET}")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{"push_url": "rtmp://vk.com/live/vk-key"}])
+        self.assertEqual(
+            response.json(),
+            [{"id": self.destination.id, "push_url": "rtmp://vk.com/live/vk-key"}],
+        )
 
     def test_destinations_hook_empty_for_unknown_stream(self):
         url = reverse("crud:stream_destinations_hook", args=["no-such-key"])
@@ -242,6 +245,35 @@ class RtmpHooksTests(TestCase):
         url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
+
+    def post_status(self, destination_id, status, secret=HOOK_SECRET):
+        url = reverse("crud:destination_status_hook")
+        return self.client.post(
+            f"{url}?secret={secret}",
+            data=json.dumps({"destination_id": destination_id, "status": status}),
+            content_type="application/json",
+        )
+
+    def test_destination_status_hook_updates_status(self):
+        response = self.post_status(self.destination.id, "live")
+        self.assertEqual(response.status_code, 200)
+        self.destination.refresh_from_db()
+        self.assertEqual(self.destination.push_status, Rtmp.PushStatus.LIVE)
+        self.assertIsNotNone(self.destination.push_status_at)
+
+    def test_destination_status_hook_rejects_bad_secret(self):
+        response = self.post_status(self.destination.id, "live", secret="wrong")
+        self.assertEqual(response.status_code, 403)
+
+    def test_destination_status_hook_rejects_unknown_status(self):
+        response = self.post_status(self.destination.id, "definitely-not-a-status")
+        self.assertEqual(response.status_code, 403)
+        self.destination.refresh_from_db()
+        self.assertEqual(self.destination.push_status, Rtmp.PushStatus.UNKNOWN)
+
+    def test_destination_status_hook_silently_ignores_unknown_destination(self):
+        response = self.post_status(999999, "live")
+        self.assertEqual(response.status_code, 200)
 
 
 class NginxStatTests(TestCase):
@@ -344,6 +376,69 @@ class StreamStatsViewTests(TestCase):
         response = self.client.get(reverse("crud:index"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Нагрузка сервера")
+
+
+class DestinationPushStatusDisplayTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="pushstatusowner",
+            email="pushstatusowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.user)
+        self.stream = Stream.objects.create(owner=self.user, name="Push status stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def get_detail(self):
+        return self.client.get(reverse("crud:stream_detail", args=[self.stream.id]))
+
+    def test_shows_live_badge_for_destination_when_stream_live(self):
+        # count=2: и бейдж самого потока (заголовок "Статистика"), и бейдж
+        # именно этой дестинации — substring-проверка одна не отличила бы
+        # случай "бейдж дестинации сломан" от "остался только бейдж потока".
+        self.destination.push_status = Rtmp.PushStatus.LIVE
+        self.destination.save(update_fields=["push_status"])
+        with patch(
+            "crud.views.fetch_stream_stats", return_value={"live": True, **_STATS}
+        ):
+            response = self.get_detail()
+        self.assertContains(response, 'class="badge live">в эфире', count=2)
+
+    def test_shows_error_badge_for_destination_when_stream_live(self):
+        self.destination.push_status = Rtmp.PushStatus.ERROR
+        self.destination.save(update_fields=["push_status"])
+        with patch(
+            "crud.views.fetch_stream_stats", return_value={"live": True, **_STATS}
+        ):
+            response = self.get_detail()
+        self.assertContains(response, 'class="badge error">ошибка')
+
+    def test_hides_destination_badge_when_stream_not_live(self):
+        # Статус дестинации мог остаться "live" со старой сессии (например,
+        # nginx упал грубо, не успев отрапортовать) — не показываем его как
+        # актуальный, если сам поток по /stat сейчас не идёт.
+        self.destination.push_status = Rtmp.PushStatus.LIVE
+        self.destination.save(update_fields=["push_status"])
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.get_detail()
+        self.assertNotContains(response, 'class="badge live">в эфире')
+
+
+_STATS = {
+    "bytes_in": 1000,
+    "bytes_out": 2000,
+    "bw_in": 100,
+    "bw_out": 200,
+    "uptime_seconds": 65,
+}
 
 
 CONTROL_URL = "http://nginx-test"

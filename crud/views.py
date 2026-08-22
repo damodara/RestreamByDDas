@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -167,9 +168,33 @@ def stream_destinations_hook(request, stream_key):
     if stream is None:
         return JsonResponse([], safe=False)
     destinations = [
-        {"push_url": destination.push_url} for destination in stream.destinations.all()
+        {"id": destination.id, "push_url": destination.push_url}
+        for destination in stream.destinations.all()
     ]
     return JsonResponse(destinations, safe=False)
+
+
+@csrf_exempt
+@require_POST
+def destination_status_hook(request):
+    if not _hook_authorized(request):
+        return HttpResponseForbidden()
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponseForbidden()
+    status = payload.get("status")
+    if status not in Rtmp.PushStatus.values:
+        return HttpResponseForbidden()
+    # .update(), не .save() — не хотим гонять destination через
+    # EncryptedCharField/clean() лишний раз ради обновления двух полей, и
+    # несуществующий destination_id (например, дестинацию удалили прямо
+    # во время публикации) должен быть тихим no-op, а не ошибкой: push.sh
+    # не в состоянии ничего сделать с ответом хука, это fire-and-forget.
+    Rtmp.objects.filter(pk=payload.get("destination_id")).update(
+        push_status=status, push_status_at=timezone.now()
+    )
+    return HttpResponse(status=200)
 
 
 @csrf_exempt
