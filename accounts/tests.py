@@ -1,9 +1,11 @@
 from django.core import mail
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import User
 from accounts.tokens import make_decision_token
+from accounts.views import LOGIN_THROTTLE_LIMIT
 
 
 class RegistrationApprovalFlowTests(TestCase):
@@ -74,3 +76,42 @@ class RegistrationApprovalFlowTests(TestCase):
             reverse("accounts:decision", args=["approve", "garbage-token"])
         )
         self.assertContains(response, "недействительна")
+
+
+class LoginThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="throttleowner",
+            email="throttleowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def attempt(self, password="wrong-password"):
+        return self.client.post(
+            reverse("accounts:login"),
+            {"username": "throttleowner", "password": password},
+        )
+
+    def test_blocks_after_repeated_failures(self):
+        for _ in range(LOGIN_THROTTLE_LIMIT):
+            self.attempt()
+        response = self.attempt()
+        self.assertContains(response, "Слишком много неудачных попыток")
+
+    def test_successful_login_resets_counter(self):
+        for _ in range(LOGIN_THROTTLE_LIMIT - 1):
+            self.attempt()
+        response = self.attempt(password="ownerpass123")
+        self.assertRedirects(response, "/crud/")
+
+        self.client.logout()
+        response = self.attempt()
+        self.assertNotContains(response, "Слишком много неудачных попыток")
+
+    def test_under_limit_shows_normal_error(self):
+        response = self.attempt()
+        self.assertNotContains(response, "Слишком много неудачных попыток")
+        self.assertContains(response, "Пожалуйста, введите правильные")
