@@ -10,7 +10,7 @@
 			<div class="row">
 				<span class="proto">Сервер</span>
 				{% if stream.publish_server %}
-					<code>{{ stream.publish_server }}</code>
+					{% include "crud/_copy_field.html" with value=stream.publish_server %}
 				{% else %}
 					<span class="unavailable">не настроено (не задан RTMP_SERVER_HOST)</span>
 				{% endif %}
@@ -18,14 +18,14 @@
 			<div class="row">
 				<span class="proto">SRT</span>
 				{% if stream.srt_publish_url %}
-					<code>{{ stream.srt_publish_url }}</code>
+					{% include "crud/_copy_field.html" with value=stream.srt_publish_url %}
 				{% else %}
 					<span class="unavailable">не настроено (не задан SRT_SERVER_HOST)</span>
 				{% endif %}
 			</div>
 			<div class="row">
 				<span class="proto">Ключ</span>
-				<code>{{ stream.stream_key }}</code>
+				{% include "crud/_copy_field.html" with value=stream.stream_key %}
 			</div>
 		</div>
 	</div>
