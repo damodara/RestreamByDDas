@@ -1,7 +1,7 @@
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
@@ -12,6 +12,7 @@ from accounts.views import (
     LOGIN_THROTTLE_LIMIT,
     PASSWORD_RESET_THROTTLE_LIMIT,
     REGISTER_THROTTLE_LIMIT,
+    client_ip,
 )
 
 
@@ -236,3 +237,29 @@ class PasswordResetThrottleTests(TestCase):
         response = self.request_reset()
         self.assertRedirects(response, reverse("accounts:password_reset_done"))
         self.assertEqual(len(mail.outbox), 1)
+
+
+class ClientIpTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_trusts_x_real_ip_behind_private_proxy(self):
+        # REMOTE_ADDR приватный — как будто запрос реально пришёл от nginx
+        # внутри docker-сети, значит X-Real-IP можно доверять.
+        request = self.factory.get(
+            "/", REMOTE_ADDR="172.19.0.4", HTTP_X_REAL_IP="8.8.8.8"
+        )
+        self.assertEqual(client_ip(request), "8.8.8.8")
+
+    def test_ignores_x_real_ip_when_remote_addr_is_public(self):
+        # REMOTE_ADDR публичный (реально маршрутизируемый, не из
+        # зарезервированных RFC5737-диапазонов для документации, которые
+        # ipaddress тоже помечает как "private") — запрос пришёл напрямую,
+        # минуя nginx (или nginx подделан), X-Real-IP мог прислать сам
+        # атакующий — не доверяем.
+        request = self.factory.get("/", REMOTE_ADDR="8.8.8.8", HTTP_X_REAL_IP="1.1.1.1")
+        self.assertEqual(client_ip(request), "8.8.8.8")
+
+    def test_falls_back_to_remote_addr_without_header(self):
+        request = self.factory.get("/", REMOTE_ADDR="172.19.0.4")
+        self.assertEqual(client_ip(request), "172.19.0.4")

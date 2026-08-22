@@ -1,3 +1,5 @@
+import ipaddress
+
 from django.contrib.auth.views import LoginView, PasswordResetView
 from django.core.cache import cache
 from django.shortcuts import render
@@ -7,6 +9,29 @@ from accounts.emails import send_admin_registration_notice, send_user_decision_n
 from accounts.forms import RegistrationForm
 from accounts.models import User
 from accounts.tokens import read_decision_token
+
+
+def client_ip(request):
+    """IP клиента для троттлинга. REMOTE_ADDR — это TCP-адрес того, кто
+    подключился НАПРЯМУЮ к Django; за nginx (как в docker-compose) это
+    всегда адрес самого nginx, а не браузера — иначе все пользователи
+    делили бы один счётчик попыток (подтверждено живым тестом: один и тот
+    же REMOTE_ADDR для разных X-Forwarded-For). Доверяем X-Real-IP только
+    когда REMOTE_ADDR — приватный/loopback адрес, т.е. соединение реально
+    пришло изнутри нашей же docker-сети (от nginx) — иначе Django слушает
+    порт 8000 и напрямую с хоста, и снаружи, где заголовок можно подделать
+    для обхода лимита или чтобы подставить чужой IP под блокировку."""
+    remote_addr = request.META.get("REMOTE_ADDR", "")
+    try:
+        is_trusted_proxy = ipaddress.ip_address(remote_addr).is_private
+    except ValueError:
+        is_trusted_proxy = False
+    if is_trusted_proxy:
+        real_ip = request.META.get("HTTP_X_REAL_IP")
+        if real_ip:
+            return real_ip
+    return remote_addr or "unknown"
+
 
 # Троттлинг неудачных попыток входа по IP — защита от перебора пароля.
 # Состояние в django.core.cache (по умолчанию LocMemCache, живёт в памяти
@@ -33,7 +58,7 @@ PASSWORD_RESET_THROTTLE_WINDOW = 3600  # 1 час
 
 class ThrottledLoginView(LoginView):
     def _cache_key(self):
-        return f"login-attempts:{self.request.META.get('REMOTE_ADDR', 'unknown')}"
+        return f"login-attempts:{client_ip(self.request)}"
 
     def post(self, request, *args, **kwargs):
         if cache.get(self._cache_key(), 0) >= LOGIN_THROTTLE_LIMIT:
@@ -58,7 +83,7 @@ class ThrottledLoginView(LoginView):
 
 def register(request):
     if request.method == "POST":
-        throttle_key = f"register-attempts:{request.META.get('REMOTE_ADDR', 'unknown')}"
+        throttle_key = f"register-attempts:{client_ip(request)}"
         if cache.get(throttle_key, 0) >= REGISTER_THROTTLE_LIMIT:
             form = RegistrationForm(request.POST)
             form.add_error(
@@ -86,9 +111,7 @@ def register(request):
 
 class ThrottledPasswordResetView(PasswordResetView):
     def _cache_key(self):
-        return (
-            f"password-reset-attempts:{self.request.META.get('REMOTE_ADDR', 'unknown')}"
-        )
+        return f"password-reset-attempts:{client_ip(self.request)}"
 
     def post(self, request, *args, **kwargs):
         key = self._cache_key()
