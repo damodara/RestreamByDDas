@@ -1,7 +1,10 @@
+from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 
 from accounts.models import User
 from accounts.tokens import make_decision_token
@@ -115,3 +118,50 @@ class LoginThrottleTests(TestCase):
         response = self.attempt()
         self.assertNotContains(response, "Слишком много неудачных попыток")
         self.assertContains(response, "Пожалуйста, введите правильные")
+
+
+class PasswordResetFlowTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="resetowner",
+            email="resetowner@example.com",
+            password="oldpass12345",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_request_sends_email_with_working_link(self):
+        response = self.client.post(
+            reverse("accounts:password_reset"), {"email": self.user.email}
+        )
+        self.assertRedirects(response, reverse("accounts:password_reset_done"))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(self.user.email, mail.outbox[0].to)
+        self.assertIn("reset/", mail.outbox[0].body)
+
+    def test_request_for_unknown_email_does_not_error(self):
+        response = self.client.post(
+            reverse("accounts:password_reset"), {"email": "nobody@example.com"}
+        )
+        self.assertRedirects(response, reverse("accounts:password_reset_done"))
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_confirm_sets_new_password(self):
+        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = default_token_generator.make_token(self.user)
+
+        # PasswordResetConfirmView меняет токен в URL на "set-password" после
+        # первого GET (хранит реальный токен в сессии) — так делает и сама
+        # Django-форма при обычном переходе по ссылке из письма.
+        follow_url = reverse("accounts:password_reset_confirm", args=[uid, token])
+        self.client.get(follow_url, follow=True)
+
+        response = self.client.post(
+            reverse("accounts:password_reset_confirm", args=[uid, "set-password"]),
+            {"new_password1": "brand-new-pass-1", "new_password2": "brand-new-pass-1"},
+        )
+        self.assertRedirects(response, reverse("accounts:password_reset_complete"))
+
+        self.assertTrue(
+            self.client.login(username="resetowner", password="brand-new-pass-1")
+        )
