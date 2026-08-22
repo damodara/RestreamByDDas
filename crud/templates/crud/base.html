@@ -10,9 +10,9 @@
 <body>
 	<div class="topbar">
 		<a class="brand" href="{% url 'crud:index' %}">RestreamByDDas</a>
-		{% if user.is_authenticated %}
+		{% if request.user.is_authenticated %}
 			<div class="user-info">
-				<span>{{ user.username }}</span>
+				<span>{{ request.user.username }}</span>
 				<form method="post" action="{% url 'accounts:logout' %}">
 					{% csrf_token %}
 					<button type="submit" class="link-button">Выйти</button>
