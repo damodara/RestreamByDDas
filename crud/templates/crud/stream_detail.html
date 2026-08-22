@@ -8,9 +8,9 @@
 	<div class="card">
 		<div class="publish-urls">
 			<div class="row">
-				<span class="proto">RTMP</span>
-				{% if stream.publish_url %}
-					<code>{{ stream.publish_url }}</code>
+				<span class="proto">Сервер</span>
+				{% if stream.publish_server %}
+					<code>{{ stream.publish_server }}</code>
 				{% else %}
 					<span class="unavailable">не настроено (не задан RTMP_SERVER_HOST)</span>
 				{% endif %}

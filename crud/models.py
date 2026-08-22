@@ -24,12 +24,12 @@ class Stream(models.Model):
         return self.name
 
     @property
-    def publish_url(self):
+    def publish_server(self):
+        # Без ключа — большинство энкодеров (OBS и т.п.) просят "Server" и
+        # "Stream Key" как два отдельных поля, а не единую строку.
         if not settings.RTMP_SERVER_HOST:
             return None
-        return (
-            f"rtmp://{settings.RTMP_SERVER_HOST}/{settings.RTMP_APP}/{self.stream_key}"
-        )
+        return f"rtmp://{settings.RTMP_SERVER_HOST}/{settings.RTMP_APP}"
 
     @property
     def srt_publish_url(self):
