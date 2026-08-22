@@ -170,6 +170,17 @@ class CrudOwnershipTests(TestCase):
         self.assertFalse(Stream.objects.filter(pk=self.stream.id).exists())
         self.assertFalse(Rtmp.objects.filter(pk=self.destination.id).exists())
 
+    def test_stream_delete_kicks_current_publisher(self):
+        # Удаление строки в БД само по себе не влияет на уже принятого
+        # nginx-ом паблишера — без явного restart_stream трансляция
+        # продолжила бы идти до тех пор, пока стример сам не отключится.
+        self.login(self.user)
+        delete_url = reverse("crud:stream_delete", args=[self.stream.id])
+        stream_key = self.stream.stream_key
+        with patch("crud.views.restart_stream") as mock_restart:
+            self.client.post(delete_url)
+        mock_restart.assert_called_once_with(stream_key)
+
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)
 class RtmpHooksTests(TestCase):

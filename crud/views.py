@@ -76,7 +76,15 @@ def stream_restart(request, stream_id):
 def stream_delete(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     if request.method == "POST":
+        stream_key = stream.stream_key
         stream.delete()
+        # Удаление строки в БД никак не сигналит nginx — уже принятый
+        # паблишер продолжил бы литься на все дестинации до тех пор, пока
+        # стример сам не отключится (подтверждено живым тестом). Сбрасываем
+        # текущего паблишера тем же механизмом, что и "Перезапустить
+        # трансляцию" — раз точки приёма больше нет, переподключиться
+        # (и снова пройти on_publish_hook) уже не получится.
+        restart_stream(stream_key)
         return redirect("crud:index")
     return render(
         request,
