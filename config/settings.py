@@ -111,6 +111,15 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Хэш содержимого в имени файла (style.css -> style.<hash>.css) — при каждом
+# изменении CSS/JS у файла новый URL, так что браузерный кэш никогда не
+# отдаёт устаревшую версию после деплоя/пересборки.
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
+    },
+}
+
 
 # Auth
 # https://docs.djangoproject.com/en/6.0/topics/auth/default/

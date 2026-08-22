@@ -52,6 +52,12 @@ http {
 
         location /static/ {
             alias /static/;
+            # Без этого браузер может закэшировать статику эвристически
+            # (по Last-Modified) и не подхватить новую версию CSS/JS после
+            # деплоя — collectstatic хэши имён файлов не проставляет, пока
+            # DEBUG=True (штатное поведение Django), так что кэш-бастинга
+            # через URL нет и приходится явно требовать ревалидацию.
+            add_header Cache-Control "no-cache";
         }
 
         location / {
