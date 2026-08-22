@@ -273,8 +273,10 @@ code {
 
 .destination-list li {
 	display: flex;
-	align-items: center;
+	flex-wrap: wrap;
+	align-items: flex-start;
 	justify-content: space-between;
+	gap: 4px 16px;
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	padding: 10px 14px;
@@ -283,12 +285,16 @@ code {
 
 .destination-list .name {
 	font-weight: 600;
+	min-width: 0;
+	word-break: break-word;
 }
 
 .destination-list .actions {
 	display: flex;
+	flex: 0 0 auto;
 	gap: 12px;
 	font-size: 0.88rem;
+	white-space: nowrap;
 }
 
 .actions-row {
@@ -297,6 +303,7 @@ code {
 	gap: 16px;
 	flex-wrap: wrap;
 	margin-top: 8px;
+	margin-bottom: 20px;
 }
 
 form p {
