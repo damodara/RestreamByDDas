@@ -179,3 +179,23 @@ NGINX_CONTROL_URL = os.getenv("NGINX_CONTROL_URL", "")
 
 SRT_SERVER_HOST = os.getenv("SRT_SERVER_HOST", "")
 SRT_PORT = os.getenv("SRT_PORT", "8890")
+
+
+# Security
+# Отдельный флаг от DEBUG намеренно: TLS в этом проекте (см. CLAUDE.md) пока
+# не настроен даже для docker-compose — если завязать secure-cookies/HSTS
+# на одно только DEBUG=False, кто-то может выключить DEBUG раньше, чем
+# появится TLS, и тихо сломать себе логин (браузер не отправит cookie с
+# флагом Secure по http://) или устроить редирект-петлю на несуществующий
+# https. Включать явно, только когда TLS реально терминируется.
+USE_TLS = os.getenv("USE_TLS", "False") == "True"
+if USE_TLS:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+# Не зависит от TLS — можно включать всегда.
+SECURE_CONTENT_TYPE_NOSNIFF = True
