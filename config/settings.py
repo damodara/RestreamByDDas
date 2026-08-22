@@ -199,3 +199,23 @@ if USE_TLS:
 
 # Не зависит от TLS — можно включать всегда.
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+
+# Logging
+# Раньше сбои интеграций с nginx-rtmp (недоступен /stat, недоступен
+# /control) молча проглатывались (except -> return None/False) — теперь они
+# хотя бы попадают в лог как WARNING, вместо того чтобы искать причину через
+# "почему статистика не грузится" без единой зацепки.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}

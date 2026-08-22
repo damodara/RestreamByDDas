@@ -1,8 +1,11 @@
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def restart_stream(stream_key):
@@ -19,4 +22,9 @@ def restart_stream(stream_key):
         with urllib.request.urlopen(url, timeout=2) as response:
             return 200 <= response.status < 300
     except (urllib.error.URLError, OSError):
+        logger.warning(
+            "restart_stream: не удалось выполнить control-запрос для %s",
+            stream_key,
+            exc_info=True,
+        )
         return False
