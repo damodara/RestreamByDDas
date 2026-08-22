@@ -12,6 +12,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(override=True)
 SECRET_KEY = os.getenv("SECRET_KEY")
 
+# Ключ шифрования RTMP-ключей дестинаций (crud.fields.EncryptedCharField) —
+# отдельный от SECRET_KEY намеренно: ротация/компрометация одного не должна
+# требовать трогать другой. Сгенерировать: `Fernet.generate_key()`.
+FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY")
+
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = [h for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h]

@@ -3,6 +3,8 @@ import secrets
 from django.conf import settings
 from django.db import models
 
+from crud.fields import EncryptedCharField
+
 
 def generate_stream_key():
     return secrets.token_urlsafe(16)
@@ -48,10 +50,11 @@ class Rtmp(models.Model):
     )
     socialmedia_url = models.URLField(verbose_name="Адрес для просмотра")
     socialmedia_rtmp_link = models.CharField(max_length=100, verbose_name="RTMP адрес")
-    socialmedia_rtmp_key = models.CharField(max_length=100, verbose_name="RTMP ключ")
-
-    class Meta:
-        unique_together = [("stream", "socialmedia_rtmp_key")]
+    # Зашифровано at rest (Fernet, см. crud/fields.py) — это реальный
+    # credential площадки, а не идентификатор. Не детерминировано, поэтому
+    # без DB-level unique/filter по значению — уникальность в рамках Stream
+    # проверяется в DestinationForm после расшифровки.
+    socialmedia_rtmp_key = EncryptedCharField(max_length=500, verbose_name="RTMP ключ")
 
     def __str__(self):
         return self.socialmedia_name

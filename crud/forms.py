@@ -20,13 +20,15 @@ class DestinationForm(forms.ModelForm):
         ]
 
     def clean_socialmedia_rtmp_key(self):
+        # socialmedia_rtmp_key зашифровано (EncryptedCharField, не
+        # детерминировано) — сравнивать приходится в Python после
+        # расшифровки, а не через .filter(socialmedia_rtmp_key=key) в БД
+        # (такой фильтр никогда бы не нашёл совпадение).
         key = self.cleaned_data["socialmedia_rtmp_key"]
-        conflicts = Rtmp.objects.filter(
-            stream=self.instance.stream, socialmedia_rtmp_key=key
-        )
+        siblings = Rtmp.objects.filter(stream=self.instance.stream)
         if self.instance.pk:
-            conflicts = conflicts.exclude(pk=self.instance.pk)
-        if conflicts.exists():
+            siblings = siblings.exclude(pk=self.instance.pk)
+        if any(sibling.socialmedia_rtmp_key == key for sibling in siblings):
             raise forms.ValidationError(
                 "Такой RTMP-ключ уже используется в этой точке приёма."
             )

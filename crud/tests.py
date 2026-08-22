@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from django.db import connection
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -135,12 +136,7 @@ class CrudOwnershipTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "уже используется")
-        self.assertEqual(
-            Rtmp.objects.filter(
-                stream=self.stream, socialmedia_rtmp_key="vk-key"
-            ).count(),
-            1,
-        )
+        self.assertEqual(Rtmp.objects.filter(stream=self.stream).count(), 1)
 
     def test_same_rtmp_key_allowed_across_different_streams(self):
         self.login(self.user)
@@ -158,11 +154,8 @@ class CrudOwnershipTests(TestCase):
         self.assertRedirects(
             response, reverse("crud:stream_detail", args=[other_stream.pk])
         )
-        self.assertTrue(
-            Rtmp.objects.filter(
-                stream=other_stream, socialmedia_rtmp_key="vk-key"
-            ).exists()
-        )
+        created = Rtmp.objects.get(stream=other_stream)
+        self.assertEqual(created.socialmedia_rtmp_key, "vk-key")
 
     def test_other_user_cannot_modify_destination(self):
         self.login(self.other_user)
@@ -474,3 +467,33 @@ class SrtPublishUrlTests(TestCase):
             self.stream.srt_publish_url,
             f"srt://example.com:8890?streamid=publish:{self.stream.stream_key}",
         )
+
+
+class RtmpKeyEncryptionTests(TestCase):
+    def test_key_stored_encrypted_but_reads_back_decrypted(self):
+        user = User.objects.create_user(
+            username="enc-owner",
+            email="enc-owner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        stream = Stream.objects.create(owner=user, name="Enc stream")
+        destination = Rtmp.objects.create(
+            stream=stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="super-secret-key",
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT socialmedia_rtmp_key FROM crud_rtmp WHERE id = %s",
+                [destination.id],
+            )
+            raw_value = cursor.fetchone()[0]
+
+        self.assertNotEqual(raw_value, "super-secret-key")
+        destination.refresh_from_db()
+        self.assertEqual(destination.socialmedia_rtmp_key, "super-secret-key")

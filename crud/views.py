@@ -3,6 +3,7 @@ import json
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
@@ -85,10 +86,17 @@ def stream_delete(request, stream_id):
 def destination_create(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     if request.method == "POST":
-        form = DestinationForm(request.POST, instance=Rtmp(stream=stream))
-        if form.is_valid():
-            form.save()
-            return redirect("crud:stream_detail", stream_id=stream.pk)
+        # Блокируем строку Stream на время проверки+сохранения — иначе два
+        # параллельных сабмита с одинаковым RTMP-ключом могут оба пройти
+        # проверку уникальности в DestinationForm (она теперь только на
+        # уровне приложения, т.к. поле зашифровано и не детерминировано,
+        # DB unique_together по нему больше не работает).
+        with transaction.atomic():
+            Stream.objects.select_for_update().get(pk=stream.pk)
+            form = DestinationForm(request.POST, instance=Rtmp(stream=stream))
+            if form.is_valid():
+                form.save()
+                return redirect("crud:stream_detail", stream_id=stream.pk)
     else:
         form = DestinationForm()
     return render(
@@ -100,10 +108,12 @@ def destination_create(request, stream_id):
 def destination_update(request, destination_id):
     destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
     if request.method == "POST":
-        form = DestinationForm(request.POST, instance=destination)
-        if form.is_valid():
-            form.save()
-            return redirect("crud:stream_detail", stream_id=destination.stream_id)
+        with transaction.atomic():
+            Stream.objects.select_for_update().get(pk=destination.stream_id)
+            form = DestinationForm(request.POST, instance=destination)
+            if form.is_valid():
+                form.save()
+                return redirect("crud:stream_detail", stream_id=destination.stream_id)
     else:
         form = DestinationForm(instance=destination)
     return render(
