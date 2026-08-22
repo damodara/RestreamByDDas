@@ -30,7 +30,11 @@ services:
     volumes:
       - static_files:/app/staticfiles
     ports:
-      - "8000:8000"
+      # Только localhost — nginx ходит на django:8000 через внутреннюю
+      # docker-сеть по имени сервиса, публикация на 0.0.0.0 тут не нужна
+      # и на реальном сервере означала бы обход nginx (и всего, что он
+      # даёт: reverse-proxy, Cache-Control) прямым доступом из интернета.
+      - "127.0.0.1:8000:8000"
 
   nginx:
     build:
