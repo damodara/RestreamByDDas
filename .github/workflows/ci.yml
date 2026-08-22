@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: restream_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SECRET_KEY: ci-only-secret-key-not-for-real-use
+      # Валидный Fernet-ключ, но одноразовый под CI — не используется нигде
+      # за пределами тестового прогона, ротировать не нужно.
+      FIELD_ENCRYPTION_KEY: -RGSCXzz90PPxT1sixYbOcCH3GrtPAPg9AIPhMqRoAI=
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DB_NAME: restream_ci
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      RTMP_HOOK_SECRET: ci-only-hook-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Check formatting (black)
+        run: poetry run black --check .
+
+      - name: Run migrations
+        run: poetry run python manage.py migrate
+
+      # Django's test runner forces DEBUG=False for the duration of the run
+      # regardless of the DEBUG env var, and ManifestStaticFilesStorage (see
+      # STATIC_URL section in settings.py) requires a real manifest once
+      # DEBUG is off — without this, any template using {% static %} (every
+      # page, via crud/base.html) throws ValueError mid-test.
+      - name: Collect static files
+        run: poetry run python manage.py collectstatic --noinput
+
+      - name: Run tests
+        run: poetry run python manage.py test
