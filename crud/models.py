@@ -1,6 +1,7 @@
 import secrets
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from crud.fields import EncryptedCharField
@@ -53,11 +54,29 @@ class Rtmp(models.Model):
     # Зашифровано at rest (Fernet, см. crud/fields.py) — это реальный
     # credential площадки, а не идентификатор. Не детерминировано, поэтому
     # без DB-level unique/filter по значению — уникальность в рамках Stream
-    # проверяется в DestinationForm после расшифровки.
+    # проверяется в clean() ниже, расшифровкой и сравнением в Python.
     socialmedia_rtmp_key = EncryptedCharField(max_length=500, verbose_name="RTMP ключ")
 
     def __str__(self):
         return self.socialmedia_name
+
+    def clean(self):
+        # На уровне модели, а не только в DestinationForm — иначе, например,
+        # Django admin (у него своя автосгенерированная ModelForm, наш
+        # DestinationForm не используется) вообще не видит эту проверку и
+        # молча создаёт дубликаты (подтверждено живьём).
+        if self.stream_id is None:
+            return
+        siblings = Rtmp.objects.filter(stream_id=self.stream_id)
+        if self.pk:
+            siblings = siblings.exclude(pk=self.pk)
+        if any(s.socialmedia_rtmp_key == self.socialmedia_rtmp_key for s in siblings):
+            raise ValidationError(
+                {
+                    "socialmedia_rtmp_key": "Такой RTMP-ключ уже используется "
+                    "в этой точке приёма."
+                }
+            )
 
     @property
     def push_url(self):

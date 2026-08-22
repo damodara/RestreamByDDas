@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from django import forms
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -508,3 +509,44 @@ class RtmpKeyEncryptionTests(TestCase):
         self.assertNotEqual(raw_value, "super-secret-key")
         destination.refresh_from_db()
         self.assertEqual(destination.socialmedia_rtmp_key, "super-secret-key")
+
+
+class RtmpUniquenessValidationTests(TestCase):
+    """Уникальность RTMP-ключа живёт в Rtmp.clean() (модель), не в
+    DestinationForm — иначе её бы не видели формы, которые DestinationForm
+    не используют, например автосгенерированная ModelForm в Django admin
+    (подтверждено живьём: без этого admin создавал дубликаты молча)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="modelvalidationowner",
+            email="modelvalidationowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Model validation")
+        Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def test_rejects_duplicate_via_generic_modelform_not_just_destination_form(self):
+        # То же самое, что строит Django admin по умолчанию для модели без
+        # явно указанного form= — а не наш кастомный DestinationForm.
+        AdminLikeForm = forms.modelform_factory(Rtmp, fields="__all__")
+        form = AdminLikeForm(
+            data={
+                "stream": self.stream.id,
+                "socialmedia_name": "VK Backup",
+                "socialmedia_url": "https://vk.com/watch2",
+                "socialmedia_rtmp_link": "rtmp://vk.com/live",
+                "socialmedia_rtmp_key": "vk-key",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("socialmedia_rtmp_key", form.errors)
+        self.assertEqual(Rtmp.objects.filter(stream=self.stream).count(), 1)
