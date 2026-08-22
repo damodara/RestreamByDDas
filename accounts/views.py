@@ -17,6 +17,12 @@ from accounts.tokens import read_decision_token
 LOGIN_THROTTLE_LIMIT = 5
 LOGIN_THROTTLE_WINDOW = 300  # 5 минут
 
+# Та же логика для регистрации — без лимита один IP мог бы плодить заявки
+# без ограничений, а каждая успешная заявка шлёт письмо всем is_staff
+# пользователям (спам администраторам, не только нагрузка на форму).
+REGISTER_THROTTLE_LIMIT = 3
+REGISTER_THROTTLE_WINDOW = 3600  # 1 час
+
 
 class ThrottledLoginView(LoginView):
     def _cache_key(self):
@@ -45,12 +51,25 @@ class ThrottledLoginView(LoginView):
 
 def register(request):
     if request.method == "POST":
+        throttle_key = f"register-attempts:{request.META.get('REMOTE_ADDR', 'unknown')}"
+        if cache.get(throttle_key, 0) >= REGISTER_THROTTLE_LIMIT:
+            form = RegistrationForm(request.POST)
+            form.add_error(
+                None,
+                "Слишком много заявок на регистрацию с этого адреса. "
+                "Попробуйте снова через час.",
+            )
+            return render(request, "accounts/register.html", {"form": form})
+
         form = RegistrationForm(request.POST)
         if form.is_valid():
             user = form.save(commit=False)
             user.is_active = False
             user.approval_status = User.ApprovalStatus.PENDING
             user.save()
+            cache.set(
+                throttle_key, cache.get(throttle_key, 0) + 1, REGISTER_THROTTLE_WINDOW
+            )
             send_admin_registration_notice(request, user)
             return render(request, "accounts/registration_pending.html")
     else:

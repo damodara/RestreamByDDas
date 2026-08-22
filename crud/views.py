@@ -1,3 +1,4 @@
+import hmac
 import json
 
 from django.conf import settings
@@ -18,7 +19,9 @@ from crud.server_load import get_server_load
 
 def _hook_authorized(request):
     secret = request.GET.get("secret", "")
-    return bool(settings.RTMP_HOOK_SECRET) and secret == settings.RTMP_HOOK_SECRET
+    return bool(settings.RTMP_HOOK_SECRET) and hmac.compare_digest(
+        secret, settings.RTMP_HOOK_SECRET
+    )
 
 
 @login_required
