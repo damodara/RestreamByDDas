@@ -64,7 +64,9 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-CI собирает и пушит все три образа под `latest` и `v1.2.0` (multi-arch: `linux/amd64`, `linux/arm64`) и синхронизирует описания образов на Docker Hub из `docker/README.*.md`. Требуются секреты репозитория `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (Settings → Secrets and variables → Actions на GitHub; токен создаётся в Docker Hub → Account Settings → Security).
+CI собирает и пушит все три образа под `latest` и `v1.2.0` (multi-arch: `linux/amd64`, `linux/arm64`). Требуются секреты репозитория `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (Settings → Secrets and variables → Actions на GitHub; токен — Docker Hub → Account Settings → Security → New Access Token, права Read & Write, не пароль от аккаунта).
+
+Описания образов на Docker Hub (карточка репозитория) CI не трогает — Hub API для этого стабильно отвечает `Forbidden` на personal access token независимо от его прав (известное ограничение самого Docker Hub, не решается настройкой токена). Текст для каждой карточки лежит в `docker/README.{django,nginx,srt}.md` — при необходимости обновить вставить вручную на странице репозитория на Docker Hub.
 
 ## Тесты
 

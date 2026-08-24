@@ -4,7 +4,9 @@ name: Publish Docker images
 # процесса релиза. DOCKERHUB_USERNAME/DOCKERHUB_TOKEN — секреты
 # репозитория (Settings → Secrets and variables → Actions), их нужно
 # завести вручную; токен — Docker Hub → Account Settings → Security →
-# New Access Token (права Read & Write), не пароль от аккаунта.
+# New Access Token (права Read & Write достаточно — только для
+# docker login/push, описания репозиториев этот workflow не трогает,
+# см. комментарий у шага Build and push), не пароль от аккаунта.
 on:
   push:
     tags:
@@ -18,13 +20,10 @@ jobs:
         include:
           - image: django
             dockerfile: Dockerfile
-            readme: docker/README.django.md
           - image: nginx
             dockerfile: nginx/Dockerfile
-            readme: docker/README.nginx.md
           - image: srt
             dockerfile: srt-gateway/Dockerfile
-            readme: docker/README.srt.md
 
     steps:
       - uses: actions/checkout@v4
@@ -63,10 +62,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Sync Docker Hub description
-        uses: peter-evans/dockerhub-description@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: damodara/restreambyddas-${{ matrix.image }}
-          readme-filepath: ${{ matrix.readme }}
+      # Синхронизация описания через peter-evans/dockerhub-description
+      # сюда сознательно не включена: Hub API репозитория (PATCH
+      # /v2/repositories/...) годами не работает с Docker Hub personal
+      # access token независимо от его прав (известное непочинённое
+      # ограничение самого Docker Hub, не этого action'а) — стабильно
+      # ловили "Error: Forbidden" даже после выдачи токену прав Read,
+      # Write, Delete. Описания в docker/README.*.md заполняются на
+      # Docker Hub вручную (см. README.md → "Docker Hub").
