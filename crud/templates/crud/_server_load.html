@@ -1,0 +1,39 @@
+<div class="card" data-server-load-url="{% url 'crud:server_load_json' %}">
+	<h2 style="margin-top:0">Нагрузка сервера</h2>
+	<div class="load-grid">
+		<div class="metric">
+			<div class="gauge {{ server_load.load1_level }}" data-gauge="load1" style="--pct: {{ server_load.load1_percent|floatformat:0 }}">
+				<span class="gauge-text">{{ server_load.load1_percent }}%</span>
+			</div>
+			<div class="value" data-value="load">{{ server_load.load1|floatformat:2 }} / {{ server_load.load5|floatformat:2 }} / {{ server_load.load15|floatformat:2 }}</div>
+			<div class="label">Load average ({{ server_load.cpu_count }} CPU)</div>
+		</div>
+		<div class="metric">
+			{% if server_load.mem_used_percent is not None %}
+				<div class="gauge {{ server_load.mem_level }}" data-gauge="mem" style="--pct: {{ server_load.mem_used_percent|floatformat:0 }}">
+					<span class="gauge-text">{{ server_load.mem_used_percent }}%</span>
+				</div>
+			{% else %}
+				<div class="gauge unknown" data-gauge="mem" style="--pct: 0">
+					<span class="gauge-text">н/д</span>
+				</div>
+			{% endif %}
+			<div class="value" data-value="mem">{% if server_load.mem_used_percent is not None %}{{ server_load.mem_used_percent }}%{% else %}н/д{% endif %}</div>
+			<div class="label">Память</div>
+		</div>
+		<div class="metric">
+			{% if server_load.disk_used_percent is not None %}
+				<div class="gauge {{ server_load.disk_level }}" data-gauge="disk" style="--pct: {{ server_load.disk_used_percent|floatformat:0 }}">
+					<span class="gauge-text">{{ server_load.disk_used_percent }}%</span>
+				</div>
+			{% else %}
+				<div class="gauge unknown" data-gauge="disk" style="--pct: 0">
+					<span class="gauge-text">н/д</span>
+				</div>
+			{% endif %}
+			<div class="value" data-value="disk">{% if server_load.disk_used_percent is not None %}{{ server_load.disk_used_percent }}%{% else %}н/д{% endif %}</div>
+			<div class="label">Диск</div>
+		</div>
+	</div>
+	<p class="hint">Load average — среднее число процессов, ожидающих CPU, за последние 1 / 5 / 15 минут (не проценты; ориентир — не выше числа ядер, {{ server_load.cpu_count }}).</p>
+</div>

@@ -7,7 +7,13 @@ app_name = "crud"
 urlpatterns = [
     path("", views.index, name="index"),
     path("streams/create/", views.stream_create, name="stream_create"),
+    path("server-load.json", views.server_load_json, name="server_load_json"),
     path("streams/<int:stream_id>/", views.stream_detail, name="stream_detail"),
+    path(
+        "streams/<int:stream_id>/stats.json",
+        views.stream_stats_json,
+        name="stream_stats_json",
+    ),
     path("streams/<int:stream_id>/delete/", views.stream_delete, name="stream_delete"),
     path(
         "streams/<int:stream_id>/restart/", views.stream_restart, name="stream_restart"

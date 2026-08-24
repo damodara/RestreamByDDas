@@ -3,6 +3,7 @@
 {% block title %}{{ stream.name }} — RestreamByDDas{% endblock %}
 
 {% block content %}
+<div data-stream-stats-url="{% url 'crud:stream_stats_json' stream.id %}">
 	<h1>{{ stream.name }}</h1>
 
 	<div class="card">
@@ -30,35 +31,35 @@
 		</div>
 	</div>
 
+	{% include "crud/_server_load.html" %}
+
 	<div class="card">
 		<h2 style="margin-top:0">
 			Статистика
-			{% if stats and stats.live %}
-				<span class="badge live">в эфире</span>
-			{% else %}
-				<span class="badge offline">не в эфире</span>
-			{% endif %}
+			<span data-live-badge class="{% if stats and stats.live %}badge live{% else %}badge offline{% endif %}">{% if stats and stats.live %}в эфире{% else %}не в эфире{% endif %}</span>
 		</h2>
-		{% if stats is None %}
-			<p class="empty-state">Статистика недоступна.</p>
-		{% elif not stats.live %}
-			<p class="empty-state">Поток сейчас не идёт.</p>
-		{% else %}
-			<div class="stats-grid">
-				<div class="metric">
-					<div class="value">{{ stats.uptime_display }}</div>
-					<div class="label">В эфире</div>
+		<div data-stats-body>
+			{% if stats is None %}
+				<p class="empty-state">Статистика недоступна.</p>
+			{% elif not stats.live %}
+				<p class="empty-state">Поток сейчас не идёт.</p>
+			{% else %}
+				<div class="stats-grid">
+					<div class="metric">
+						<div class="value">{{ stats.uptime_display }}</div>
+						<div class="label">В эфире</div>
+					</div>
+					<div class="metric">
+						<div class="value">{{ stats.bytes_in|filesizeformat }}</div>
+						<div class="label">Принято ({{ stats.bw_in }} bit/s)</div>
+					</div>
+					<div class="metric">
+						<div class="value">{{ stats.bytes_out|filesizeformat }}</div>
+						<div class="label">Отдано ({{ stats.bw_out }} bit/s)</div>
+					</div>
 				</div>
-				<div class="metric">
-					<div class="value">{{ stats.bytes_in|filesizeformat }}</div>
-					<div class="label">Принято ({{ stats.bw_in }} bit/s)</div>
-				</div>
-				<div class="metric">
-					<div class="value">{{ stats.bytes_out|filesizeformat }}</div>
-					<div class="label">Отдано ({{ stats.bw_out }} bit/s)</div>
-				</div>
-			</div>
-		{% endif %}
+			{% endif %}
+		</div>
 
 		<div class="actions-row">
 			<form method="post" action="{% url 'crud:stream_restart' stream.id %}">
@@ -80,13 +81,15 @@
 				<li>
 					<span class="name-group">
 						<span class="name">{{ destination.socialmedia_name }}</span>
-						{% if stats and stats.live %}
-							{% if destination.push_status == "live" %}
-								<span class="badge live">в эфире</span>
-							{% elif destination.push_status == "error" %}
-								<span class="badge error">ошибка</span>
+						<span data-destination-badge="{{ destination.id }}">
+							{% if stats and stats.live %}
+								{% if destination.push_status == "live" %}
+									<span class="badge live">в эфире</span>
+								{% elif destination.push_status == "error" %}
+									<span class="badge error">ошибка</span>
+								{% endif %}
 							{% endif %}
-						{% endif %}
+						</span>
 					</span>
 					<span class="actions">
 						<a href="{% url 'crud:destination_update' destination.id %}">изменить</a>
@@ -101,4 +104,5 @@
 
 	<p style="margin-top:32px"><a href="{% url 'crud:stream_delete' stream.id %}">Удалить точку приёма</a></p>
 	<p><a href="{% url 'crud:index' %}">← Назад к списку</a></p>
+</div>
 {% endblock %}

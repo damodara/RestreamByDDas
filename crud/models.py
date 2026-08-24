@@ -49,7 +49,7 @@ class Rtmp(models.Model):
     socialmedia_name = models.CharField(
         max_length=100, verbose_name="Название соц сети для рестрима"
     )
-    socialmedia_url = models.URLField(verbose_name="Адрес для просмотра")
+    socialmedia_url = models.URLField(verbose_name="Адрес для просмотра", blank=True)
     socialmedia_rtmp_link = models.CharField(max_length=100, verbose_name="RTMP адрес")
     # Зашифровано at rest (Fernet, см. crud/fields.py) — это реальный
     # credential площадки, а не идентификатор. Не детерминировано, поэтому

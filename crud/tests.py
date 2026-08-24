@@ -645,3 +645,105 @@ class RtmpUniquenessValidationTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("socialmedia_rtmp_key", form.errors)
         self.assertEqual(Rtmp.objects.filter(stream=self.stream).count(), 1)
+
+
+class LiveStatsJsonViewTests(TestCase):
+    """JS-поллинг (crud/static/crud/live_stats.js) на index/stream_detail
+    бьёт эти эндпоинты вместо перезагрузки страницы — проверяем ту же
+    авторизацию/owner-scoping, что и у остальных crud-вьюх, плюс форму
+    ответа, которую разбирает фронт."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="jsonowner",
+            email="jsonowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="jsonother",
+            email="jsonother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="JSON stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def test_server_load_json_requires_login(self):
+        response = self.client.get(reverse("crud:server_load_json"))
+        self.assertRedirects(
+            response,
+            f"{reverse('accounts:login')}?next={reverse('crud:server_load_json')}",
+        )
+
+    def test_server_load_json_returns_expected_keys(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("crud:server_load_json"))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        for key in (
+            "load1",
+            "load5",
+            "load15",
+            "cpu_count",
+            "load1_percent",
+            "load1_level",
+            "mem_used_percent",
+            "mem_level",
+            "disk_used_percent",
+            "disk_level",
+        ):
+            self.assertIn(key, data)
+
+    def test_stream_stats_json_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        response = self.client.get(
+            reverse("crud:stream_stats_json", args=[self.stream.id])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_stream_stats_json_includes_destination_status_when_live(self):
+        self.destination.push_status = Rtmp.PushStatus.LIVE
+        self.destination.save(update_fields=["push_status"])
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_stream_stats",
+            return_value={
+                "live": True,
+                "bytes_in": 1000,
+                "bytes_out": 2000,
+                "bw_in": 100,
+                "bw_out": 200,
+                "uptime_seconds": 65,
+            },
+        ):
+            response = self.client.get(
+                reverse("crud:stream_stats_json", args=[self.stream.id])
+            )
+        data = response.json()
+        self.assertTrue(data["stats"]["live"])
+        self.assertEqual(data["stats"]["uptime_display"], "1:05")
+        self.assertEqual(
+            data["destinations"], [{"id": self.destination.id, "push_status": "live"}]
+        )
+
+    def test_stream_stats_json_hides_destination_status_when_not_live(self):
+        self.destination.push_status = Rtmp.PushStatus.LIVE
+        self.destination.save(update_fields=["push_status"])
+        self.client.force_login(self.user)
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.client.get(
+                reverse("crud:stream_stats_json", args=[self.stream.id])
+            )
+        data = response.json()
+        self.assertEqual(
+            data["destinations"], [{"id": self.destination.id, "push_status": None}]
+        )

@@ -5,44 +5,7 @@
 {% block content %}
 	<h1>Мои точки приёма</h1>
 
-	<div class="card">
-		<h2 style="margin-top:0">Нагрузка сервера</h2>
-		<div class="load-grid">
-			<div class="metric">
-				<div class="gauge {{ server_load.load1_level }}" style="--pct: {{ server_load.load1_percent|floatformat:0 }}">
-					<span class="gauge-text">{{ server_load.load1_percent }}%</span>
-				</div>
-				<div class="value">{{ server_load.load1|floatformat:2 }} / {{ server_load.load5|floatformat:2 }} / {{ server_load.load15|floatformat:2 }}</div>
-				<div class="label">Load average ({{ server_load.cpu_count }} CPU)</div>
-			</div>
-			<div class="metric">
-				{% if server_load.mem_used_percent is not None %}
-					<div class="gauge {{ server_load.mem_level }}" style="--pct: {{ server_load.mem_used_percent|floatformat:0 }}">
-						<span class="gauge-text">{{ server_load.mem_used_percent }}%</span>
-					</div>
-				{% else %}
-					<div class="gauge unknown" style="--pct: 0">
-						<span class="gauge-text">н/д</span>
-					</div>
-				{% endif %}
-				<div class="value">{% if server_load.mem_used_percent is not None %}{{ server_load.mem_used_percent }}%{% else %}н/д{% endif %}</div>
-				<div class="label">Память</div>
-			</div>
-			<div class="metric">
-				{% if server_load.disk_used_percent is not None %}
-					<div class="gauge {{ server_load.disk_level }}" style="--pct: {{ server_load.disk_used_percent|floatformat:0 }}">
-						<span class="gauge-text">{{ server_load.disk_used_percent }}%</span>
-					</div>
-				{% else %}
-					<div class="gauge unknown" style="--pct: 0">
-						<span class="gauge-text">н/д</span>
-					</div>
-				{% endif %}
-				<div class="value">{% if server_load.disk_used_percent is not None %}{{ server_load.disk_used_percent }}%{% else %}н/д{% endif %}</div>
-				<div class="label">Диск</div>
-			</div>
-		</div>
-	</div>
+	{% include "crud/_server_load.html" %}
 
 	<div class="actions-row">
 		<a class="button" href="{% url 'crud:stream_create' %}">+ Создать точку приёма</a>

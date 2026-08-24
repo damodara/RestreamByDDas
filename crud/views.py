@@ -49,17 +49,51 @@ def stream_create(request):
     return render(request, "crud/stream_form.html", {"form": form})
 
 
-@login_required
-def stream_detail(request, stream_id):
-    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+def _stream_stats(stream):
+    """Общая логика между stream_detail (HTML) и stream_stats_json — держим
+    в одном месте, чтобы обновление на лету (JS-поллинг) не могло разойтись
+    с тем, что рендерится при обычной загрузке страницы."""
     stats = fetch_stream_stats(stream.stream_key)
     if stats and stats.get("live"):
         stats["uptime_display"] = (
             f"{stats['uptime_seconds'] // 60}:{stats['uptime_seconds'] % 60:02d}"
         )
+    live = bool(stats and stats.get("live"))
+    destinations = [
+        {
+            "id": d.id,
+            # Тот же staleness-guard, что и в шаблоне: статус пуша не
+            # показываем, если по /stat сам стрим сейчас не live.
+            "push_status": d.push_status if live else None,
+        }
+        for d in stream.destinations.all()
+    ]
+    return stats, destinations
+
+
+@login_required
+def stream_detail(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    stats, _ = _stream_stats(stream)
     return render(
-        request, "crud/stream_detail.html", {"stream": stream, "stats": stats}
+        request,
+        "crud/stream_detail.html",
+        {"stream": stream, "stats": stats, "server_load": get_server_load()},
     )
+
+
+@login_required
+@require_GET
+def server_load_json(request):
+    return JsonResponse(get_server_load())
+
+
+@login_required
+@require_GET
+def stream_stats_json(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    stats, destinations = _stream_stats(stream)
+    return JsonResponse({"stats": stats, "destinations": destinations})
 
 
 @login_required
