@@ -55,6 +55,10 @@ docker compose -f docker-compose.prod.yml up -d
 
 Версия образов задаётся переменной `TAG` (по умолчанию `latest`), например `TAG=v1.2.0 docker compose -f docker-compose.prod.yml up -d`.
 
+Используйте `docker-compose.prod.yml` как есть, не переписывайте его вручную — там уже расставлены все обязательные переменные окружения между сервисами (`ALLOWED_HOSTS` с добавлением `,django` для хуков, `NGINX_RTMP_HOST` для SRT-моста, пути монтирования статики и т.п.); ручной compose легко получить рабочим лишь частично.
+
+При отсутствующих/некорректных `FIELD_ENCRYPTION_KEY` или `ALLOWED_HOSTS` (при `DEBUG=False`) контейнер `django` завершится сразу при старте с понятной ошибкой в `docker compose logs django` (`crud.E001`/`crud.E002`/`crud.E003`) — а не тихо взлетит и упадёт позже на первой попытке добавить дестинацию или принять поток.
+
 ### Выпуск релиза (для мейнтейнера)
 
 Публикация образов автоматическая по CI (`.github/workflows/docker-publish.yml`), запускается git-тегом:
