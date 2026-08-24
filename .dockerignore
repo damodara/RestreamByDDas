@@ -5,3 +5,11 @@ __pycache__
 .git
 .idea
 .vscode
+staticfiles/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.log
+.github/
+docker/

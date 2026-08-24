@@ -1,0 +1,72 @@
+name: Publish Docker images
+
+# Триггерится тегом вида v1.2.0 — см. README.md → «Docker Hub» для
+# процесса релиза. DOCKERHUB_USERNAME/DOCKERHUB_TOKEN — секреты
+# репозитория (Settings → Secrets and variables → Actions), их нужно
+# завести вручную; токен — Docker Hub → Account Settings → Security →
+# New Access Token (права Read & Write), не пароль от аккаунта.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: django
+            dockerfile: Dockerfile
+            readme: docker/README.django.md
+          - image: nginx
+            dockerfile: nginx/Dockerfile
+            readme: docker/README.nginx.md
+          - image: srt
+            dockerfile: srt-gateway/Dockerfile
+            readme: docker/README.srt.md
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: damodara/restreambyddas-${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      # Собирать из корня репозитория для всех трёх — nginx и srt
+      # тянут rtmp-push/ и srt-bridge/ соответственно (см. комментарий
+      # в начале каждого Dockerfile).
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Sync Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: damodara/restreambyddas-${{ matrix.image }}
+          readme-filepath: ${{ matrix.readme }}

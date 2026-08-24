@@ -42,6 +42,30 @@ poetry run python manage.py runserver
 
 Без Docker недоступен сам приём/релей RTMP и SRT (это отдельные компоненты — nginx-rtmp и MediaMTX) — только веб-интерфейс управления точками приёма и дестинациями.
 
+## Docker Hub
+
+Готовые образы: `damodara/restreambyddas-django`, `damodara/restreambyddas-nginx`, `damodara/restreambyddas-srt`. Каждый образ — часть стека, по отдельности не запускается (нужны минимум `django`+`nginx`, `srt` — опционально для приёма по SRT). Запуск без клонирования репозитория целиком, только `docker-compose.prod.yml` и `.env`:
+
+```bash
+curl -O https://raw.githubusercontent.com/damodara/RestreamByDDas/master/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/damodara/RestreamByDDas/master/.env_example
+cp .env_example .env   # заполнить значения
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Версия образов задаётся переменной `TAG` (по умолчанию `latest`), например `TAG=v1.2.0 docker compose -f docker-compose.prod.yml up -d`.
+
+### Выпуск релиза (для мейнтейнера)
+
+Публикация образов автоматическая по CI (`.github/workflows/docker-publish.yml`), запускается git-тегом:
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+CI собирает и пушит все три образа под `latest` и `v1.2.0` (multi-arch: `linux/amd64`, `linux/arm64`) и синхронизирует описания образов на Docker Hub из `docker/README.*.md`. Требуются секреты репозитория `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (Settings → Secrets and variables → Actions на GitHub; токен создаётся в Docker Hub → Account Settings → Security).
+
 ## Тесты
 
 ```bash
@@ -56,3 +80,7 @@ poetry run python manage.py test
 4. Сервер принимает поток и рассылает копии на все дестинации.
 
 Список дестинаций подхватывается только в момент старта публикации: если изменить дестинации у уже запущенного стрима, нужно нажать «Перезапустить трансляцию» на странице точки приёма (или переподключить энкодер вручную).
+
+## Лицензия
+
+[MIT](LICENSE)

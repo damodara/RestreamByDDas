@@ -1,0 +1,78 @@
+# Запуск из готовых образов с Docker Hub вместо локальной сборки —
+# для сервера, куда клонировать репозиторий не нужно (нужны только этот
+# файл и .env). Собрать и сохранить в реестр сами образы — отдельный
+# шаг, см. README.md → «Docker Hub» и .github/workflows/docker-publish.yml.
+#
+# Использование:
+#   cp .env_example .env   # заполнить значения
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# TAG можно переопределить переменной окружения (например TAG=v1.2.0),
+# по умолчанию — latest.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  django:
+    image: damodara/restreambyddas-django:${TAG:-latest}
+    env_file: .env
+    environment:
+      DB_HOST: db
+      # nginx-хуки (on_publish/destinations) ходят на http://django:8000
+      # напрямую, поэтому Django должен принимать Host: django в
+      # дополнение к публичному хосту из .env.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS},django
+      NGINX_STAT_URL: http://nginx:8080/stat
+      NGINX_CONTROL_URL: http://nginx:8080
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - static_files:/app/staticfiles
+    ports:
+      # Только localhost — nginx ходит на django:8000 через внутреннюю
+      # docker-сеть по имени сервиса, публикация на 0.0.0.0 тут не нужна
+      # и на реальном сервере означала бы обход nginx (и всего, что он
+      # даёт: reverse-proxy, Cache-Control) прямым доступом из интернета.
+      - "127.0.0.1:8000:8000"
+
+  nginx:
+    image: damodara/restreambyddas-nginx:${TAG:-latest}
+    environment:
+      DJANGO_HOOK_BASE_URL: http://django:8000
+      RTMP_HOOK_SECRET: ${RTMP_HOOK_SECRET}
+    depends_on:
+      - django
+    volumes:
+      - static_files:/static:ro
+    ports:
+      - "80:80"
+      - "1935:1935"
+      - "127.0.0.1:8080:8080"
+
+  srt:
+    image: damodara/restreambyddas-srt:${TAG:-latest}
+    environment:
+      DJANGO_HOOK_BASE_URL: http://django:8000
+      RTMP_HOOK_SECRET: ${RTMP_HOOK_SECRET}
+      NGINX_RTMP_HOST: nginx
+    depends_on:
+      - django
+      - nginx
+    ports:
+      - "8890:8890/udp"
+
+volumes:
+  postgres_data:
+  static_files:
