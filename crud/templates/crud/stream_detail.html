@@ -58,6 +58,22 @@
 						<div class="label">Отдано ({{ stats.bw_out }} bit/s)</div>
 					</div>
 				</div>
+					{% if stats.video_codec or stats.audio_codec %}
+						<div class="stats-grid media-info" data-media-info>
+							{% if stats.video_codec %}
+								<div class="metric">
+									<div class="value">{{ stats.video_width }}×{{ stats.video_height }}</div>
+									<div class="label">{{ stats.video_codec }}{% if stats.video_frame_rate %}, {{ stats.video_frame_rate }} fps{% endif %}</div>
+								</div>
+							{% endif %}
+							{% if stats.audio_codec %}
+								<div class="metric">
+									<div class="value">{{ stats.audio_codec }}</div>
+									<div class="label">{% if stats.audio_sample_rate %}{{ stats.audio_sample_rate }} Hz, {% endif %}{{ stats.audio_channels }} канал(ов)</div>
+								</div>
+							{% endif %}
+						</div>
+					{% endif %}
 			{% endif %}
 		</div>
 
@@ -78,6 +94,9 @@
 			<div class="row">
 				<input type="text" id="id_youtube_chat_video_id" name="youtube_chat_video_id" value="{{ stream.youtube_chat_video_id }}" placeholder="https://www.youtube.com/watch?v=...">
 				<button type="submit" class="button secondary">Сохранить</button>
+				{% if stream.youtube_chat_video_id %}
+					<button type="submit" formaction="{% url 'crud:stream_chat_reset' stream.id %}" formnovalidate class="danger" onclick="return confirm('Отключить чат и удалить историю сообщений?')">Сбросить</button>
+				{% endif %}
 			</div>
 		</form>
 		<div class="chat-messages" data-chat-messages>

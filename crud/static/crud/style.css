@@ -440,6 +440,11 @@ code {
 	margin-top: 12px;
 }
 
+.stats-grid.media-info {
+	padding-top: 12px;
+	border-top: 1px solid var(--border);
+}
+
 .stats-grid .metric .value {
 	font-size: 1.1rem;
 	font-weight: 600;

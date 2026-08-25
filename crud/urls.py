@@ -24,6 +24,11 @@ urlpatterns = [
         views.stream_chat_settings,
         name="stream_chat_settings",
     ),
+    path(
+        "streams/<int:stream_id>/chat-reset/",
+        views.stream_chat_reset,
+        name="stream_chat_reset",
+    ),
     path("streams/<int:stream_id>/delete/", views.stream_delete, name="stream_delete"),
     path(
         "streams/<int:stream_id>/restart/", views.stream_restart, name="stream_restart"

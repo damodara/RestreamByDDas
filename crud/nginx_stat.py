@@ -27,7 +27,7 @@ def fetch_stream_stats(stream_key):
         name = stream.findtext("name")
         if name != stream_key:
             continue
-        return {
+        result = {
             "live": True,
             "bytes_in": int(stream.findtext("bytes_in", "0")),
             "bytes_out": int(stream.findtext("bytes_out", "0")),
@@ -35,5 +35,34 @@ def fetch_stream_stats(stream_key):
             "bw_out": int(stream.findtext("bw_out", "0")),
             "uptime_seconds": int(stream.findtext("time", "0")) // 1000,
         }
+        result.update(_parse_meta(stream.find("meta")))
+        return result
 
     return {"live": False}
+
+
+def _parse_meta(meta):
+    """Технические параметры входящего потока — nginx-rtmp узнаёт их из
+    onMetaData/заголовков кодека самого потока, не от нас, так что блок
+    <meta> может на секунду-другую отсутствовать сразу после начала
+    публикации, пока nginx их не разобрал. Ключи отсутствуют в
+    результате (не None), если meta целиком нет — шаблон/JS одинаково
+    решают "нечего показывать" что для отсутствующего ключа, что для None."""
+    if meta is None:
+        return {}
+
+    parsed = {}
+    video = meta.find("video")
+    if video is not None:
+        parsed["video_width"] = video.findtext("width")
+        parsed["video_height"] = video.findtext("height")
+        parsed["video_frame_rate"] = video.findtext("frame_rate")
+        parsed["video_codec"] = video.findtext("codec")
+
+    audio = meta.find("audio")
+    if audio is not None:
+        parsed["audio_codec"] = audio.findtext("codec")
+        parsed["audio_channels"] = audio.findtext("channels")
+        parsed["audio_sample_rate"] = audio.findtext("sample_rate")
+
+    return parsed

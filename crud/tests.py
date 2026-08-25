@@ -46,6 +46,44 @@ STAT_XML = b"""<?xml version="1.0" encoding="utf-8" ?>
 </rtmp>
 """
 
+STAT_XML_WITH_META = b"""<?xml version="1.0" encoding="utf-8" ?>
+<rtmp>
+<server>
+<application>
+<name>live</name>
+<live>
+<stream>
+<name>known-key</name>
+<bytes_in>1000</bytes_in>
+<bytes_out>2000</bytes_out>
+<bw_in>100</bw_in>
+<bw_out>200</bw_out>
+<time>65000</time>
+<meta>
+<video>
+<width>1280</width>
+<height>720</height>
+<frame_rate>30</frame_rate>
+<codec>H264</codec>
+<profile></profile>
+<compat>0</compat>
+<level>3.1</level>
+</video>
+<audio>
+<codec>AAC</codec>
+<profile>LC</profile>
+<channels>1</channels>
+<sample_rate>44100</sample_rate>
+</audio>
+</meta>
+</stream>
+<nclients>1</nclients>
+</live>
+</application>
+</server>
+</rtmp>
+"""
+
 
 class RootUrlTests(TestCase):
     def test_root_redirects_to_crud_index(self):
@@ -422,6 +460,35 @@ class NginxStatTests(TestCase):
             stats = fetch_stream_stats("no-such-key")
         self.assertEqual(stats, {"live": False})
 
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_includes_media_info_when_meta_present(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML_WITH_META
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            stats = fetch_stream_stats("known-key")
+        self.assertEqual(stats["video_width"], "1280")
+        self.assertEqual(stats["video_height"], "720")
+        self.assertEqual(stats["video_frame_rate"], "30")
+        self.assertEqual(stats["video_codec"], "H264")
+        self.assertEqual(stats["audio_codec"], "AAC")
+        self.assertEqual(stats["audio_channels"], "1")
+        self.assertEqual(stats["audio_sample_rate"], "44100")
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_omits_media_info_when_meta_absent(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            stats = fetch_stream_stats("known-key")
+        self.assertNotIn("video_codec", stats)
+        self.assertNotIn("audio_codec", stats)
+
 
 class YoutubeChatApiTests(TestCase):
     @override_settings(YOUTUBE_API_KEY="")
@@ -743,6 +810,53 @@ class StreamChatViewTests(TestCase):
         data = response.json()
         self.assertEqual(len(data["messages"]), 1)
         self.assertEqual(data["messages"][0]["text"], "Второе")
+
+    def test_chat_reset_requires_login(self):
+        url = reverse("crud:stream_chat_reset", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_chat_reset_requires_post(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_reset", args=[self.stream.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_owner_can_reset_chat(self):
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="Зритель",
+            text="Привет!",
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_reset", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertRedirects(
+            response, reverse("crud:stream_detail", args=[self.stream.id])
+        )
+        self.stream.refresh_from_db()
+        self.assertEqual(self.stream.youtube_chat_video_id, "")
+        self.assertEqual(self.stream.chat_messages.count(), 0)
+
+    def test_other_user_cannot_reset_chat(self):
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="Зритель",
+            text="Привет!",
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_chat_reset", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+        self.stream.refresh_from_db()
+        self.assertEqual(self.stream.youtube_chat_video_id, "video-1")
+        self.assertEqual(self.stream.chat_messages.count(), 1)
 
 
 class ServerLoadTests(TestCase):

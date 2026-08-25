@@ -141,6 +141,20 @@ def stream_chat_settings(request, stream_id):
 
 @login_required
 @require_POST
+def stream_chat_reset(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    stream.youtube_chat_video_id = ""
+    stream.save(update_fields=["youtube_chat_video_id"])
+    # Иначе при следующем подключении чата к новому видео старые
+    # сообщения от прошлой трансляции остались бы висеть вперемешку с
+    # новыми — сброс должен быть чистым, не только отключением источника.
+    stream.chat_messages.all().delete()
+    messages.success(request, "Чат отключён, история сообщений очищена.")
+    return redirect("crud:stream_detail", stream_id=stream.pk)
+
+
+@login_required
+@require_POST
 def stream_restart(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     if restart_stream(stream.stream_key):

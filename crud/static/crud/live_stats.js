@@ -88,7 +88,7 @@
 			} else if (!stats.live) {
 				body.innerHTML = '<p class="empty-state">Поток сейчас не идёт.</p>';
 			} else {
-				body.innerHTML =
+				var html =
 					'<div class="stats-grid">' +
 					'<div class="metric"><div class="value">' +
 					stats.uptime_display +
@@ -104,6 +104,37 @@
 					stats.bw_out +
 					' bit/s)</div></div>' +
 					"</div>";
+
+				if (stats.video_codec || stats.audio_codec) {
+					html += '<div class="stats-grid media-info">';
+					if (stats.video_codec) {
+						html +=
+							'<div class="metric"><div class="value">' +
+							stats.video_width +
+							"×" +
+							stats.video_height +
+							'</div><div class="label">' +
+							stats.video_codec +
+							(stats.video_frame_rate
+								? ", " + stats.video_frame_rate + " fps"
+								: "") +
+							"</div></div>";
+					}
+					if (stats.audio_codec) {
+						html +=
+							'<div class="metric"><div class="value">' +
+							stats.audio_codec +
+							'</div><div class="label">' +
+							(stats.audio_sample_rate
+								? stats.audio_sample_rate + " Hz, "
+								: "") +
+							stats.audio_channels +
+							" канал(ов)</div></div>";
+					}
+					html += "</div>";
+				}
+
+				body.innerHTML = html;
 			}
 		}
 
