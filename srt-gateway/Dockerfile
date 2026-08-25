@@ -2,11 +2,14 @@
 #   docker build -f srt-gateway/Dockerfile -t restream-srt-gateway .
 FROM debian:bookworm-slim
 
+ARG APP_VERSION=dev
+
 LABEL org.opencontainers.image.title="RestreamByDDas (SRT gateway)" \
       org.opencontainers.image.description="MediaMTX-based SRT ingest gateway for RestreamByDDas, bridging into the same RTMP pipeline as the nginx image. Part of the RestreamByDDas stack; run alongside the django and nginx images from the same project, not standalone." \
       org.opencontainers.image.source="https://github.com/damodara/RestreamByDDas" \
       org.opencontainers.image.documentation="https://github.com/damodara/RestreamByDDas/blob/master/README.md" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${APP_VERSION}"
 
 ARG MEDIAMTX_VERSION=v1.19.2
 ARG TARGETARCH

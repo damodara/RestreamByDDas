@@ -85,6 +85,32 @@ STAT_XML_WITH_META = b"""<?xml version="1.0" encoding="utf-8" ?>
 """
 
 
+class AppVersionFooterTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="footerowner",
+            email="footerowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    @override_settings(APP_VERSION="v1.2.3")
+    def test_footer_shows_configured_version(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("crud:index"))
+        self.assertContains(response, '<footer class="site-footer">')
+        self.assertContains(response, "v1.2.3")
+
+    def test_footer_defaults_to_dev(self):
+        # APP_VERSION не задан явно ни в settings.py, ни через .env в
+        # тестовом окружении — тот же дефолт, что при bare-metal запуске
+        # без сборки Docker-образа.
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("crud:index"))
+        self.assertContains(response, "dev")
+
+
 class RootUrlTests(TestCase):
     def test_root_redirects_to_crud_index(self):
         response = self.client.get("/")
@@ -759,6 +785,39 @@ class StreamChatViewTests(TestCase):
         self.stream.refresh_from_db()
         self.assertEqual(self.stream.youtube_chat_video_id, "video-1")
 
+    def test_saving_empty_video_id_also_clears_message_history(self):
+        # Отключить чат можно и через "Сохранить" с пустым полем, не
+        # только через выделенную кнопку "Сбросить" — старые сообщения
+        # не должны переживать оба пути одинаково.
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="Зритель",
+            text="Привет!",
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_settings", args=[self.stream.id])
+        self.client.post(url, {"youtube_chat_video_id": ""})
+        self.stream.refresh_from_db()
+        self.assertEqual(self.stream.youtube_chat_video_id, "")
+        self.assertEqual(self.stream.chat_messages.count(), 0)
+
+    def test_saving_new_video_id_keeps_message_history(self):
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="Зритель",
+            text="Привет!",
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_settings", args=[self.stream.id])
+        self.client.post(url, {"youtube_chat_video_id": "https://youtu.be/newId"})
+        self.assertEqual(self.stream.chat_messages.count(), 1)
+
     def test_chat_json_requires_login(self):
         url = reverse("crud:stream_chat_json", args=[self.stream.id])
         response = self.client.get(url)
@@ -810,6 +869,27 @@ class StreamChatViewTests(TestCase):
         data = response.json()
         self.assertEqual(len(data["messages"]), 1)
         self.assertEqual(data["messages"][0]["text"], "Второе")
+
+    def test_chat_json_hides_messages_when_source_disconnected(self):
+        # Даже если в БД почему-то остались старые строки (например,
+        # чат отключили в обход stream_chat_settings/stream_chat_reset),
+        # эндпоинт не должен их отдавать, пока youtube_chat_video_id пуст.
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="Зритель",
+            text="Старое сообщение",
+            posted_at=timezone.now(),
+        )
+        self.stream.youtube_chat_video_id = ""
+        self.stream.save(update_fields=["youtube_chat_video_id"])
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_json", args=[self.stream.id])
+        response = self.client.get(url)
+        data = response.json()
+        self.assertEqual(data["messages"], [])
+        self.assertFalse(data["chat_enabled"])
 
     def test_chat_reset_requires_login(self):
         url = reverse("crud:stream_chat_reset", args=[self.stream.id])

@@ -1,10 +1,20 @@
 FROM python:3.13-slim
 
+# Дефолт "dev" — для локальной сборки (docker compose up --build) без
+# CI, где нет git-тега в контексте. CI (.github/workflows/docker-publish.yml)
+# передаёт сюда сам тег релиза (--build-arg APP_VERSION=v1.2.3).
+ARG APP_VERSION=dev
+
 LABEL org.opencontainers.image.title="RestreamByDDas (Django)" \
       org.opencontainers.image.description="Django app for managing RTMP/SRT restream targets — web UI + hook endpoints. Part of the RestreamByDDas stack; run alongside the nginx and srt images from the same project, not standalone." \
       org.opencontainers.image.source="https://github.com/damodara/RestreamByDDas" \
       org.opencontainers.image.documentation="https://github.com/damodara/RestreamByDDas/blob/master/README.md" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${APP_VERSION}"
+
+# В отличие от LABEL (видно только через `docker inspect`), это читает
+# сам Django (settings.APP_VERSION) — показывается в футере на сайте.
+ENV APP_VERSION=${APP_VERSION}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \

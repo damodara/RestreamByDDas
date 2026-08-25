@@ -56,6 +56,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "crud.context_processors.app_version",
             ],
         },
     },
@@ -187,6 +188,13 @@ SRT_PORT = os.getenv("SRT_PORT", "8890")
 # Пусто = чтение чата недоступно, poll_youtube_chat просто ничего не делает
 # (тот же fail-soft паттерн, что у NGINX_STAT_URL/NGINX_CONTROL_URL).
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+
+# Версия релиза — не пользовательская настройка, а метаданные сборки:
+# Dockerfile прописывает её через ENV APP_VERSION (сам ARG приходит из
+# docker-publish.yml, значение = git-тег релиза, например "v1.2.3").
+# Дефолт "dev" — для локального/bare-metal запуска без сборки образа.
+# Показывается в футере сайта (crud.context_processors.app_version).
+APP_VERSION = os.getenv("APP_VERSION", "dev")
 
 
 # Security

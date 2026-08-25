@@ -182,6 +182,7 @@
 		var url = root.dataset.chatUrl;
 		var container = root.querySelector("[data-chat-messages]");
 		var lastId = 0;
+		var wasEnabled = null;
 
 		function tick() {
 			var fetchUrl = url + (lastId ? "?after_id=" + lastId : "");
@@ -190,7 +191,26 @@
 					return r.ok ? r.json() : null;
 				})
 				.then(function (data) {
-					if (!data || !data.messages.length) return;
+					if (!data) return;
+					if (!data.chat_enabled) {
+						// Источник отключили (в этой вкладке или в другой) —
+						// сбрасываем локальное состояние поллинга и то, что
+						// уже нарисовано, иначе старые сообщения от прошлой
+						// трансляции продолжали бы висеть на странице вечно,
+						// раз новых сообщений больше не приходит и вызывать
+						// перерисовку нечем.
+						if (wasEnabled !== false) {
+							lastId = 0;
+							if (container) {
+								container.innerHTML =
+									'<p class="empty-state">Чат не подключён — укажите ссылку на трансляцию выше.</p>';
+							}
+						}
+						wasEnabled = false;
+						return;
+					}
+					wasEnabled = true;
+					if (!data.messages.length) return;
 					if (lastId === 0 && container) {
 						container.innerHTML = "";
 					}

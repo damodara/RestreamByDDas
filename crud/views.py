@@ -105,6 +105,16 @@ def stream_stats_json(request, stream_id):
 @require_GET
 def stream_chat_json(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    chat_enabled = bool(stream.youtube_chat_video_id)
+    if not chat_enabled:
+        # Источник отключён — не отдаём сообщения, даже если старые строки
+        # почему-то остались в БД (например, отключили через "Сохранить"
+        # с пустым полем, а не через "Сбросить" — тот сразу чистит
+        # историю, но полагаться на то, что чистка произошла именно
+        # так/именно тогда, не стоит; эндпоинт сам не должен путать
+        # "чат не подключён" с "чат подключён, но сообщений пока нет").
+        return JsonResponse({"messages": [], "chat_enabled": False})
+
     after_id = request.GET.get("after_id")
     qs = stream.chat_messages.all()
     if after_id:
@@ -121,9 +131,7 @@ def stream_chat_json(request, stream_id):
         }
         for message in messages_qs
     ]
-    return JsonResponse(
-        {"messages": messages, "chat_enabled": bool(stream.youtube_chat_video_id)}
-    )
+    return JsonResponse({"messages": messages, "chat_enabled": True})
 
 
 @login_required
@@ -133,6 +141,12 @@ def stream_chat_settings(request, stream_id):
     form = StreamChatForm(request.POST, instance=stream)
     if form.is_valid():
         form.save()
+        if not stream.youtube_chat_video_id:
+            # То же самое, что и явный "Сбросить" — источник отключили,
+            # какой бы кнопкой это ни было сделано. Иначе сообщения от
+            # прошлой трансляции просто остаются в БД до следующего
+            # подключения нового видео и путаются с новыми.
+            stream.chat_messages.all().delete()
         messages.success(request, "Настройки чата сохранены.")
     else:
         messages.error(request, "Не удалось сохранить — проверьте ссылку/ID.")

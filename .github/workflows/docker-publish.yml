@@ -61,6 +61,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
 
       # Синхронизация описания через peter-evans/dockerhub-description
       # сюда сознательно не включена: Hub API репозитория (PATCH
