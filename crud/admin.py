@@ -10,4 +10,5 @@ class StreamAdmin(admin.ModelAdmin):
 
 @admin.register(Rtmp)
 class RtmpAdmin(admin.ModelAdmin):
-    list_display = ("socialmedia_name", "stream", "socialmedia_url")
+    list_display = ("socialmedia_name", "stream", "socialmedia_url", "enabled")
+    list_filter = ("enabled",)

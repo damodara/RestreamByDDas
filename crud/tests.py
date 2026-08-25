@@ -123,6 +123,38 @@ class CrudOwnershipTests(TestCase):
         self.client.post(delete_url)
         self.assertFalse(Rtmp.objects.filter(pk=destination.id).exists())
 
+    def test_destination_enabled_by_default(self):
+        self.assertTrue(self.destination.enabled)
+
+    def test_owner_can_toggle_destination(self):
+        self.login(self.user)
+        toggle_url = reverse("crud:destination_toggle", args=[self.destination.id])
+
+        response = self.client.post(toggle_url)
+        self.assertRedirects(
+            response, reverse("crud:stream_detail", args=[self.stream.id])
+        )
+        self.destination.refresh_from_db()
+        self.assertFalse(self.destination.enabled)
+
+        self.client.post(toggle_url)
+        self.destination.refresh_from_db()
+        self.assertTrue(self.destination.enabled)
+
+    def test_toggle_requires_post(self):
+        self.login(self.user)
+        toggle_url = reverse("crud:destination_toggle", args=[self.destination.id])
+        response = self.client.get(toggle_url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_other_user_cannot_toggle_destination(self):
+        self.login(self.other_user)
+        toggle_url = reverse("crud:destination_toggle", args=[self.destination.id])
+        response = self.client.post(toggle_url)
+        self.assertEqual(response.status_code, 404)
+        self.destination.refresh_from_db()
+        self.assertTrue(self.destination.enabled)
+
     def test_duplicate_rtmp_key_within_same_stream_rejected(self):
         self.login(self.user)
         create_url = reverse("crud:destination_create", args=[self.stream.id])
@@ -234,6 +266,14 @@ class RtmpHooksTests(TestCase):
             response.json(),
             [{"id": self.destination.id, "push_url": "rtmp://vk.com/live/vk-key"}],
         )
+
+    def test_destinations_hook_excludes_disabled_destination(self):
+        self.destination.enabled = False
+        self.destination.save(update_fields=["enabled"])
+        url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
+        response = self.client.get(f"{url}?secret={HOOK_SECRET}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
 
     def test_destinations_hook_empty_for_unknown_stream(self):
         url = reverse("crud:stream_destinations_hook", args=["no-such-key"])

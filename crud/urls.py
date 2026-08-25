@@ -33,6 +33,11 @@ urlpatterns = [
         views.destination_delete,
         name="destination_delete",
     ),
+    path(
+        "destinations/<int:destination_id>/toggle/",
+        views.destination_toggle,
+        name="destination_toggle",
+    ),
     path("rtmp-hooks/on-publish/", views.on_publish_hook, name="on_publish_hook"),
     path(
         "rtmp-hooks/destinations/<str:stream_key>/",

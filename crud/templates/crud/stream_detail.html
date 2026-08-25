@@ -78,8 +78,15 @@
 	{% if stream.destinations.all %}
 		<ul class="destination-list">
 			{% for destination in stream.destinations.all %}
-				<li>
+				<li class="{% if not destination.enabled %}disabled{% endif %}">
 					<span class="name-group">
+						<form method="post" action="{% url 'crud:destination_toggle' destination.id %}">
+							{% csrf_token %}
+							<label class="toggle-switch" title="{% if destination.enabled %}Рестримится — нажмите, чтобы выключить{% else %}Не рестримится — нажмите, чтобы включить{% endif %}">
+								<input type="checkbox" {% if destination.enabled %}checked{% endif %} onchange="this.form.requestSubmit()">
+								<span class="toggle-slider"></span>
+							</label>
+						</form>
 						<span class="name">{{ destination.socialmedia_name }}</span>
 						<span data-destination-badge="{{ destination.id }}">
 							{% if stats and stats.live %}

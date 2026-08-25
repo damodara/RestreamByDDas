@@ -183,6 +183,15 @@ def destination_delete(request, destination_id):
     )
 
 
+@login_required
+@require_POST
+def destination_toggle(request, destination_id):
+    destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
+    destination.enabled = not destination.enabled
+    destination.save(update_fields=["enabled"])
+    return redirect("crud:stream_detail", stream_id=destination.stream_id)
+
+
 @csrf_exempt
 @require_POST
 def on_publish_hook(request):
@@ -203,7 +212,7 @@ def stream_destinations_hook(request, stream_key):
         return JsonResponse([], safe=False)
     destinations = [
         {"id": destination.id, "push_url": destination.push_url}
-        for destination in stream.destinations.all()
+        for destination in stream.destinations.filter(enabled=True)
     ]
     return JsonResponse(destinations, safe=False)
 

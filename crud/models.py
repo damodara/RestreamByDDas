@@ -56,6 +56,12 @@ class Rtmp(models.Model):
     # без DB-level unique/filter по значению — уникальность в рамках Stream
     # проверяется в clean() ниже, расшифровкой и сравнением в Python.
     socialmedia_rtmp_key = EncryptedCharField(max_length=500, verbose_name="RTMP ключ")
+    # Тумблер в stream_detail.html — выключенные дестинации не попадают в
+    # ответ stream_destinations_hook (см. crud/views.py), т.е. push.sh их
+    # не получит и ffmpeg на них не запустится. Как и остальной список
+    # дестинаций, подхватывается только в момент старта публикации, а не
+    # у уже идущего стрима (см. hint в stream_detail.html).
+    enabled = models.BooleanField(default=True, verbose_name="Рестримить")
 
     class PushStatus(models.TextChoices):
         UNKNOWN = "unknown", "—"
