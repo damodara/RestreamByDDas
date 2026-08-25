@@ -44,7 +44,7 @@ poetry run python manage.py runserver
 
 ## Docker Hub
 
-Готовые образы: `damodara/restreambyddas-django`, `damodara/restreambyddas-nginx`, `damodara/restreambyddas-srt`. Каждый образ — часть стека, по отдельности не запускается (нужны минимум `django`+`nginx`, `srt` — опционально для приёма по SRT). Запуск без клонирования репозитория целиком, только `docker-compose.prod.yml` и `.env`:
+Готовые образы: `damodara/restreambyddas-django`, `damodara/restreambyddas-nginx`, `damodara/restreambyddas-srt`. Каждый образ — часть стека, по отдельности не запускается (нужны минимум `django`+`nginx`, `srt` — опционально для приёма по SRT). Запуск без клонирования репозитория целиком, только `docker-compose.prod.yml` и `.env`. Подробная пошаговая инструкция для установки на сервер (генерация секретов, HTTPS, обновление, бэкап БД) — [DEPLOY.md](DEPLOY.md). Кратко:
 
 ```bash
 curl -O https://raw.githubusercontent.com/damodara/RestreamByDDas/master/docker-compose.prod.yml
@@ -54,6 +54,15 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Версия образов задаётся переменной `TAG` (по умолчанию `latest`), например `TAG=v1.2.0 docker compose -f docker-compose.prod.yml up -d`.
+
+### Обновление на новую версию
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`pull` обязателен: если образ с нужным тегом (`latest` или конкретная версия) уже есть на машине, `docker compose up -d` его не перекачивает и молча перезапустит контейнеры на том же старом образе — без явного `pull` обновления просто не будет видно.
 
 Используйте `docker-compose.prod.yml` как есть, не переписывайте его вручную — там уже расставлены все обязательные переменные окружения между сервисами (`ALLOWED_HOSTS` с добавлением `,django` для хуков, `NGINX_RTMP_HOST` для SRT-моста, пути монтирования статики и т.п.); ручной compose легко получить рабочим лишь частично.
 
