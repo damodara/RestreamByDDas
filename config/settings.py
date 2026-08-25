@@ -180,6 +180,14 @@ NGINX_CONTROL_URL = os.getenv("NGINX_CONTROL_URL", "")
 SRT_SERVER_HOST = os.getenv("SRT_SERVER_HOST", "")
 SRT_PORT = os.getenv("SRT_PORT", "8890")
 
+# Multi-chat (YouTube)
+# Собственный API-ключ проекта в Google Cloud Console (YouTube Data API v3
+# включена) — не OAuth пользователя: чтение публичного чата трансляции не
+# требует авторизации от лица зрителя/владельца канала, достаточно ключа.
+# Пусто = чтение чата недоступно, poll_youtube_chat просто ничего не делает
+# (тот же fail-soft паттерн, что у NGINX_STAT_URL/NGINX_CONTROL_URL).
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+
 
 # Security
 # Отдельный флаг от DEBUG намеренно: TLS в этом проекте (см. CLAUDE.md) пока

@@ -10,14 +10,17 @@ from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
-from crud.models import Rtmp, Stream
+from crud.forms import StreamChatForm
+from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_stream_stats
 from crud.server_load import get_server_load
 from crud.templatetags.ru_plural import ru_days
+from crud.youtube_chat import fetch_live_chat_id, fetch_new_messages
 
 HOOK_SECRET = "test-hook-secret"
 STAT_URL = "http://nginx-test/stat"
@@ -381,6 +384,328 @@ class NginxStatTests(TestCase):
         self.assertEqual(stats, {"live": False})
 
 
+class YoutubeChatApiTests(TestCase):
+    @override_settings(YOUTUBE_API_KEY="")
+    def test_fetch_live_chat_id_returns_none_without_key(self):
+        with patch("crud.youtube_chat.urllib.request.urlopen") as mock_urlopen:
+            self.assertIsNone(fetch_live_chat_id("abc123"))
+            mock_urlopen.assert_not_called()
+
+    @override_settings(YOUTUBE_API_KEY="test-key")
+    def test_fetch_live_chat_id_parses_response(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"items": [{"liveStreamingDetails": {"activeLiveChatId": "chat-123"}}]}
+        ).encode()
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.youtube_chat.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertEqual(fetch_live_chat_id("abc123"), "chat-123")
+
+    @override_settings(YOUTUBE_API_KEY="test-key")
+    def test_fetch_live_chat_id_returns_none_for_unknown_video(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"items": []}).encode()
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.youtube_chat.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertIsNone(fetch_live_chat_id("no-such-video"))
+
+    @override_settings(YOUTUBE_API_KEY="test-key")
+    def test_fetch_live_chat_id_returns_none_on_network_error(self):
+        with patch("crud.youtube_chat.urllib.request.urlopen", side_effect=OSError):
+            self.assertIsNone(fetch_live_chat_id("abc123"))
+
+    @override_settings(YOUTUBE_API_KEY="test-key")
+    def test_fetch_new_messages_parses_response(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "items": [
+                    {
+                        "id": "msg-1",
+                        "snippet": {
+                            "displayMessage": "Привет!",
+                            "publishedAt": "2026-01-01T12:00:00Z",
+                        },
+                        "authorDetails": {"displayName": "Зритель"},
+                    }
+                ],
+                "nextPageToken": "token-2",
+                "pollingIntervalMillis": 4000,
+            }
+        ).encode()
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.youtube_chat.urllib.request.urlopen", return_value=mock_response
+        ):
+            result = fetch_new_messages("chat-123")
+        messages, next_page_token, interval = result
+        self.assertEqual(
+            messages,
+            [
+                {
+                    "external_id": "msg-1",
+                    "author_name": "Зритель",
+                    "text": "Привет!",
+                    "posted_at": messages[0]["posted_at"],
+                }
+            ],
+        )
+        self.assertEqual(next_page_token, "token-2")
+        self.assertEqual(interval, 4.0)
+
+    @override_settings(YOUTUBE_API_KEY="test-key")
+    def test_fetch_new_messages_skips_malformed_items(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"items": [{"id": "msg-1", "snippet": {}, "authorDetails": {}}]}
+        ).encode()
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.youtube_chat.urllib.request.urlopen", return_value=mock_response
+        ):
+            messages, _, _ = fetch_new_messages("chat-123")
+        self.assertEqual(messages, [])
+
+
+class PollYoutubeChatCommandTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="chatowner",
+            email="chatowner@example.com",
+            password="ownerpass123",
+        )
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Chat stream", youtube_chat_video_id="video-1"
+        )
+
+    def test_tick_creates_messages_when_live(self):
+        from crud.management.commands.poll_youtube_chat import Command
+
+        state = {}
+        with (
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_stream_stats",
+                return_value={"live": True},
+            ),
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_live_chat_id",
+                return_value="chat-123",
+            ),
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_new_messages",
+                return_value=(
+                    [
+                        {
+                            "external_id": "msg-1",
+                            "author_name": "Зритель",
+                            "text": "Привет!",
+                            "posted_at": timezone.now(),
+                        }
+                    ],
+                    "next-token",
+                    5,
+                ),
+            ),
+        ):
+            Command()._tick(state)
+
+        self.assertEqual(ChatMessage.objects.filter(stream=self.stream).count(), 1)
+        message = ChatMessage.objects.get(stream=self.stream)
+        self.assertEqual(message.author_name, "Зритель")
+        self.assertEqual(message.platform, ChatMessage.Platform.YOUTUBE)
+
+    def test_tick_does_not_duplicate_messages(self):
+        from crud.management.commands.poll_youtube_chat import Command
+
+        state = {}
+        with (
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_stream_stats",
+                return_value={"live": True},
+            ),
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_live_chat_id",
+                return_value="chat-123",
+            ),
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_new_messages",
+                return_value=(
+                    [
+                        {
+                            "external_id": "msg-1",
+                            "author_name": "Зритель",
+                            "text": "Привет!",
+                            "posted_at": timezone.now(),
+                        }
+                    ],
+                    "next-token",
+                    5,
+                ),
+            ),
+        ):
+            command = Command()
+            command._tick(state)
+            state[self.stream.id]["next_poll_at"] = timezone.now()
+            command._tick(state)
+
+        self.assertEqual(ChatMessage.objects.filter(stream=self.stream).count(), 1)
+
+    def test_tick_skips_stream_when_not_live(self):
+        from crud.management.commands.poll_youtube_chat import Command
+
+        state = {}
+        with (
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_stream_stats",
+                return_value={"live": False},
+            ),
+            patch(
+                "crud.management.commands.poll_youtube_chat.fetch_live_chat_id"
+            ) as mock_live_chat_id,
+        ):
+            Command()._tick(state)
+            mock_live_chat_id.assert_not_called()
+
+        self.assertEqual(ChatMessage.objects.filter(stream=self.stream).count(), 0)
+
+    def test_tick_ignores_streams_without_video_id(self):
+        from crud.management.commands.poll_youtube_chat import Command
+
+        Stream.objects.create(owner=self.user, name="No chat stream")
+        state = {}
+        with patch(
+            "crud.management.commands.poll_youtube_chat.fetch_stream_stats",
+            return_value={"live": True},
+        ) as mock_fetch_stats:
+            Command()._tick(state)
+            # Только один стрим (self.stream) имеет youtube_chat_video_id —
+            # значит fetch_stream_stats должен вызваться ровно один раз.
+            self.assertEqual(mock_fetch_stats.call_count, 1)
+
+
+class StreamChatFormTests(TestCase):
+    def make_form(self, value):
+        return StreamChatForm(data={"youtube_chat_video_id": value})
+
+    def test_extracts_id_from_watch_url(self):
+        form = self.make_form("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["youtube_chat_video_id"], "dQw4w9WgXcQ")
+
+    def test_extracts_id_from_short_url(self):
+        form = self.make_form("https://youtu.be/dQw4w9WgXcQ")
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["youtube_chat_video_id"], "dQw4w9WgXcQ")
+
+    def test_accepts_raw_id(self):
+        form = self.make_form("dQw4w9WgXcQ")
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["youtube_chat_video_id"], "dQw4w9WgXcQ")
+
+    def test_accepts_empty_value(self):
+        form = self.make_form("")
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["youtube_chat_video_id"], "")
+
+
+class StreamChatViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="chatviewowner",
+            email="chatviewowner@example.com",
+            password="ownerpass123",
+        )
+        self.other_user = User.objects.create_user(
+            username="chatviewother",
+            email="chatviewother@example.com",
+            password="otherpass123",
+        )
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Chat view stream", youtube_chat_video_id="video-1"
+        )
+
+    def test_chat_settings_requires_login(self):
+        url = reverse("crud:stream_chat_settings", args=[self.stream.id])
+        response = self.client.post(url, {"youtube_chat_video_id": "abc"})
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_owner_can_update_chat_video_id(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_settings", args=[self.stream.id])
+        response = self.client.post(
+            url, {"youtube_chat_video_id": "https://youtu.be/newVideoId"}
+        )
+        self.assertRedirects(
+            response, reverse("crud:stream_detail", args=[self.stream.id])
+        )
+        self.stream.refresh_from_db()
+        self.assertEqual(self.stream.youtube_chat_video_id, "newVideoId")
+
+    def test_other_user_cannot_update_chat_settings(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_chat_settings", args=[self.stream.id])
+        response = self.client.post(url, {"youtube_chat_video_id": "hacked"})
+        self.assertEqual(response.status_code, 404)
+        self.stream.refresh_from_db()
+        self.assertEqual(self.stream.youtube_chat_video_id, "video-1")
+
+    def test_chat_json_requires_login(self):
+        url = reverse("crud:stream_chat_json", args=[self.stream.id])
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404_for_chat_json(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_chat_json", args=[self.stream.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_chat_json_returns_recent_messages(self):
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="Зритель",
+            text="Привет!",
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_json", args=[self.stream.id])
+        response = self.client.get(url)
+        data = response.json()
+        self.assertEqual(len(data["messages"]), 1)
+        self.assertEqual(data["messages"][0]["author_name"], "Зритель")
+        self.assertTrue(data["chat_enabled"])
+
+    def test_chat_json_incremental_after_id(self):
+        first = ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-1",
+            author_name="A",
+            text="Первое",
+            posted_at=timezone.now(),
+        )
+        ChatMessage.objects.create(
+            stream=self.stream,
+            platform=ChatMessage.Platform.YOUTUBE,
+            external_id="msg-2",
+            author_name="B",
+            text="Второе",
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_chat_json", args=[self.stream.id])
+        response = self.client.get(url, {"after_id": first.id})
+        data = response.json()
+        self.assertEqual(len(data["messages"]), 1)
+        self.assertEqual(data["messages"][0]["text"], "Второе")
+
+
 class ServerLoadTests(TestCase):
     def test_returns_expected_keys(self):
         data = get_server_load()
@@ -436,6 +761,47 @@ class RuDaysFilterTests(TestCase):
 
     def test_non_numeric_falls_back(self):
         self.assertEqual(ru_days("не число"), "дней")
+
+
+class PlatformBadgeTests(TestCase):
+    def make(self, socialmedia_name):
+        stream = Stream.objects.create(
+            owner=User.objects.create_user(
+                username=f"badgeowner{socialmedia_name}",
+                email=f"badgeowner{socialmedia_name}@example.com".replace(" ", ""),
+                password="ownerpass123",
+            ),
+            name="Badge stream",
+        )
+        return Rtmp(
+            stream=stream,
+            socialmedia_name=socialmedia_name,
+            socialmedia_rtmp_link="rtmp://example.com/live",
+            socialmedia_rtmp_key="key",
+        )
+
+    def test_recognizes_known_platforms(self):
+        cases = {
+            "VK": ("VK", "#0077FF"),
+            "Вконтакте": ("VK", "#0077FF"),
+            "YouTube Live": ("YT", "#FF0000"),
+            "Мой Twitch": ("TW", "#9146FF"),
+            "Telegram канал": ("TG", "#26A5E4"),
+            "Одноклассники": ("ОК", "#EE8208"),
+            "RuTube": ("RT", "#1D6FB8"),
+            "Vimeo": ("VM", "#1AB7EA"),
+            "Trovo": ("TR", "#19D66B"),
+            "Kick": ("K", "#53FC18"),
+        }
+        for name, (label, color) in cases.items():
+            destination = self.make(name)
+            self.assertEqual(
+                destination.platform_badge, {"label": label, "color": color}
+            )
+
+    def test_unknown_platform_falls_back_to_initial(self):
+        destination = self.make("Facebook")
+        self.assertEqual(destination.platform_badge, {"label": "F", "color": "#6b7280"})
 
 
 def _age_file(path, days):

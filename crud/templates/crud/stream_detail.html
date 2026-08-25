@@ -70,6 +70,21 @@
 		<p class="hint">Сработает, только если стриминговый клиент (например OBS) сам переподключается после разрыва — так делает большинство энкодеров по умолчанию. Также нужно после добавления/изменения destination-ов, чтобы они подхватились.</p>
 	</div>
 
+	<div class="card" data-chat-url="{% url 'crud:stream_chat_json' stream.id %}">
+		<h2 style="margin-top:0">Чат</h2>
+		<form method="post" action="{% url 'crud:stream_chat_settings' stream.id %}" class="chat-source-form">
+			{% csrf_token %}
+			<label for="id_youtube_chat_video_id">YouTube — ссылка на трансляцию или Video ID</label>
+			<div class="row">
+				<input type="text" id="id_youtube_chat_video_id" name="youtube_chat_video_id" value="{{ stream.youtube_chat_video_id }}" placeholder="https://www.youtube.com/watch?v=...">
+				<button type="submit" class="button secondary">Сохранить</button>
+			</div>
+		</form>
+		<div class="chat-messages" data-chat-messages>
+			<p class="empty-state">{% if stream.youtube_chat_video_id %}Сообщений пока нет.{% else %}Чат не подключён — укажите ссылку на трансляцию выше.{% endif %}</p>
+		</div>
+	</div>
+
 	<h2>Куда рестримим</h2>
 	<div class="actions-row">
 		<a class="button" href="{% url 'crud:destination_create' stream.id %}">+ Добавить destination</a>
@@ -87,6 +102,7 @@
 								<span class="toggle-slider"></span>
 							</label>
 						</form>
+						<span class="platform-badge" style="background-color: {{ destination.platform_badge.color }}" title="{{ destination.socialmedia_name }}">{{ destination.platform_badge.label }}</span>
 						{% if destination.socialmedia_url %}
 							<a class="name" href="{{ destination.socialmedia_url }}" target="_blank" rel="noopener noreferrer">{{ destination.socialmedia_name }}</a>
 						{% else %}

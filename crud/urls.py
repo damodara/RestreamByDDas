@@ -14,6 +14,16 @@ urlpatterns = [
         views.stream_stats_json,
         name="stream_stats_json",
     ),
+    path(
+        "streams/<int:stream_id>/chat.json",
+        views.stream_chat_json,
+        name="stream_chat_json",
+    ),
+    path(
+        "streams/<int:stream_id>/chat-settings/",
+        views.stream_chat_settings,
+        name="stream_chat_settings",
+    ),
     path("streams/<int:stream_id>/delete/", views.stream_delete, name="stream_delete"),
     path(
         "streams/<int:stream_id>/restart/", views.stream_restart, name="stream_restart"

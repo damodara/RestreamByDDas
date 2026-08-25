@@ -12,8 +12,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from crud.destination_logs import MAX_LINES, read_destination_log
-from crud.forms import DestinationForm, StreamForm
-from crud.models import Rtmp, Stream
+from crud.forms import DestinationForm, StreamChatForm, StreamForm
+from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_stream_stats
 from crud.server_load import get_server_load
@@ -99,6 +99,44 @@ def stream_stats_json(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     stats, destinations = _stream_stats(stream)
     return JsonResponse({"stats": stats, "destinations": destinations})
+
+
+@login_required
+@require_GET
+def stream_chat_json(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    after_id = request.GET.get("after_id")
+    qs = stream.chat_messages.all()
+    if after_id:
+        # Инкрементальный поллинг — только новые сообщения с прошлого раза.
+        messages_qs = qs.filter(pk__gt=after_id)
+    else:
+        # Первая загрузка страницы — последние 50, в хронологическом порядке.
+        messages_qs = reversed(qs.order_by("-posted_at")[:50])
+    messages = [
+        {
+            "id": message.id,
+            "author_name": message.author_name,
+            "text": message.text,
+        }
+        for message in messages_qs
+    ]
+    return JsonResponse(
+        {"messages": messages, "chat_enabled": bool(stream.youtube_chat_video_id)}
+    )
+
+
+@login_required
+@require_POST
+def stream_chat_settings(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    form = StreamChatForm(request.POST, instance=stream)
+    if form.is_valid():
+        form.save()
+        messages.success(request, "Настройки чата сохранены.")
+    else:
+        messages.error(request, "Не удалось сохранить — проверьте ссылку/ID.")
+    return redirect("crud:stream_detail", stream_id=stream.pk)
 
 
 @login_required

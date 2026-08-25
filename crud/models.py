@@ -11,6 +11,28 @@ def generate_stream_key():
     return secrets.token_urlsafe(16)
 
 
+# Опознаём площадку по подстроке в socialmedia_name (свободный текст,
+# пользователь вводит как хочет) — только для цветного бейджа-иконки в
+# stream_detail.html, ни на что функциональное не влияет. Официальные
+# логотипы (SVG) сознательно не используем — точное воспроизведение
+# чужих товарных знаков не стоит того ради декоративной иконки; вместо
+# этого — фирменный цвет площадки + инициалы, узнаваемо и без этого риска.
+# Короткие/двусмысленные подстроки (типа "ok") намеренно не включены —
+# слишком легко случайно совпадают с частью другого слова.
+_PLATFORM_BADGES = [
+    (("вконтакте", "vkontakte", "vk.com", "vk"), "VK", "#0077FF"),
+    (("youtube", "ютуб"), "YT", "#FF0000"),
+    (("twitch",), "TW", "#9146FF"),
+    (("telegram", "телеграм", "телега"), "TG", "#26A5E4"),
+    (("одноклассники", "ok.ru", "okru"), "ОК", "#EE8208"),
+    (("rutube", "рутуб"), "RT", "#1D6FB8"),
+    (("vimeo",), "VM", "#1AB7EA"),
+    (("trovo",), "TR", "#19D66B"),
+    (("kick",), "K", "#53FC18"),
+]
+_DEFAULT_BADGE_COLOR = "#6b7280"
+
+
 class Stream(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="streams", on_delete=models.CASCADE
@@ -20,6 +42,20 @@ class Stream(models.Model):
         max_length=64, unique=True, editable=False, default=generate_stream_key
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # ID видео YouTube-трансляции (из ссылки/студии YouTube) — вводится
+    # пользователем вручную, как и остальные внешние адреса в проекте (RTMP
+    # push URL и т.п.), мы её не создаём и не обнаруживаем автоматически.
+    # Пусто = чат для этой точки приёма не подключён. Не привязано к
+    # конкретной Rtmp-дестинации намеренно: чат — свойство самой трансляции
+    # ("что льётся в этот stream_key прямо сейчас"), а не какого-то одного
+    # из направлений рестрима.
+    # max_length рассчитан на то, что сюда вставят целую ссылку, а не
+    # только голый ID — StreamChatForm.clean_youtube_chat_video_id
+    # укорачивает её до ID при сохранении, но валидация max_length на
+    # ModelForm срабатывает раньше clean_<field>(), на исходной строке.
+    youtube_chat_video_id = models.CharField(
+        max_length=200, blank=True, verbose_name="YouTube Video ID для чата"
+    )
 
     def __str__(self):
         return self.name
@@ -108,3 +144,42 @@ class Rtmp(models.Model):
     @property
     def push_url(self):
         return f"{self.socialmedia_rtmp_link.rstrip('/')}/{self.socialmedia_rtmp_key}"
+
+    @property
+    def platform_badge(self):
+        name = self.socialmedia_name.lower()
+        for keywords, label, color in _PLATFORM_BADGES:
+            if any(keyword in name for keyword in keywords):
+                return {"label": label, "color": color}
+        first_char = self.socialmedia_name.strip()[:1].upper() or "?"
+        return {"label": first_char, "color": _DEFAULT_BADGE_COLOR}
+
+
+class ChatMessage(models.Model):
+    class Platform(models.TextChoices):
+        YOUTUBE = "youtube", "YouTube"
+
+    stream = models.ForeignKey(
+        Stream, related_name="chat_messages", on_delete=models.CASCADE
+    )
+    platform = models.CharField(max_length=10, choices=Platform.choices)
+    # ID сообщения на стороне площадки — YouTube иногда отдаёт одно и то же
+    # сообщение повторно на соседних страницах поллинга; unique_together
+    # ниже + get_or_create в poll_youtube_chat защищают от дублей на вставке.
+    external_id = models.CharField(max_length=100)
+    author_name = models.CharField(max_length=200)
+    text = models.TextField()
+    posted_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stream", "platform", "external_id"],
+                name="unique_chat_message_per_stream_platform",
+            )
+        ]
+        ordering = ["posted_at"]
+
+    def __str__(self):
+        return f"{self.author_name}: {self.text[:50]}"

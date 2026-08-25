@@ -143,8 +143,50 @@
 		setInterval(tick, POLL_INTERVAL_MS);
 	}
 
+	var CHAT_POLL_INTERVAL_MS = 3000;
+
+	function pollChat() {
+		var root = document.querySelector("[data-chat-url]");
+		if (!root) return;
+		var url = root.dataset.chatUrl;
+		var container = root.querySelector("[data-chat-messages]");
+		var lastId = 0;
+
+		function tick() {
+			var fetchUrl = url + (lastId ? "?after_id=" + lastId : "");
+			fetch(fetchUrl, { headers: { Accept: "application/json" } })
+				.then(function (r) {
+					return r.ok ? r.json() : null;
+				})
+				.then(function (data) {
+					if (!data || !data.messages.length) return;
+					if (lastId === 0 && container) {
+						container.innerHTML = "";
+					}
+					data.messages.forEach(function (message) {
+						if (container) {
+							var el = document.createElement("div");
+							el.className = "chat-message";
+							var author = document.createElement("strong");
+							author.textContent = message.author_name;
+							el.appendChild(author);
+							el.appendChild(document.createTextNode(message.text));
+							container.appendChild(el);
+						}
+						lastId = message.id;
+					});
+					if (container) container.scrollTop = container.scrollHeight;
+				})
+				.catch(function () {});
+		}
+
+		tick();
+		setInterval(tick, CHAT_POLL_INTERVAL_MS);
+	}
+
 	document.addEventListener("DOMContentLoaded", function () {
 		pollServerLoad();
 		pollStreamStats();
+		pollChat();
 	});
 })();

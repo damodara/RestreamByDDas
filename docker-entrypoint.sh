@@ -37,4 +37,15 @@ python manage.py cleanup_destination_logs || true
     done
 ) &
 
+# Один долгоживущий процесс на весь контейнер — сам поллит YouTube чат в
+# бесконечном цикле (не завершается сам по себе, в отличие от cleanup
+# выше). Обёрнут в while, чтобы перезапускался, если всё же упадёт на
+# необработанном исключении, а не тихо пропадал до рестарта контейнера.
+(
+    while true; do
+        python manage.py poll_youtube_chat || true
+        sleep 5
+    done
+) &
+
 exec python manage.py runserver 0.0.0.0:8000
