@@ -47,6 +47,45 @@ STAT_XML = b"""<?xml version="1.0" encoding="utf-8" ?>
 """
 
 
+class RootUrlTests(TestCase):
+    def test_root_redirects_to_crud_index(self):
+        response = self.client.get("/")
+        # target_status_code=302: crud:index сам требует логин и дальше
+        # редиректит анонима — это ожидаемо, проверяется отдельно ниже.
+        self.assertRedirects(response, reverse("crud:index"), target_status_code=302)
+
+    def test_root_eventually_reaches_login_for_anonymous(self):
+        # Два прыжка: "/" -> "/crud/" (этот RedirectView) -> "/accounts/
+        # login/" (crud:index сам требует логин) — цепочку уже проверяет
+        # CrudOwnershipTests.test_anonymous_redirects_to_login для второго
+        # прыжка отдельно, здесь — что вся цепочка целиком доходит до 200.
+        response = self.client.get("/", follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.redirect_chain,
+            [
+                (reverse("crud:index"), 302),
+                (
+                    f"{reverse('accounts:login')}?next={reverse('crud:index')}",
+                    302,
+                ),
+            ],
+        )
+
+    def test_root_eventually_reaches_index_for_authenticated_user(self):
+        User.objects.create_user(
+            username="rooter",
+            email="rooter@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(User.objects.get(username="rooter"))
+        response = self.client.get("/", follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.redirect_chain, [(reverse("crud:index"), 302)])
+
+
 class CrudOwnershipTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
