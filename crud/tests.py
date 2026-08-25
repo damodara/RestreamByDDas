@@ -126,6 +126,19 @@ class CrudOwnershipTests(TestCase):
     def test_destination_enabled_by_default(self):
         self.assertTrue(self.destination.enabled)
 
+    def test_destination_name_links_to_viewing_url_when_set(self):
+        self.login(self.user)
+        response = self.client.get(reverse("crud:stream_detail", args=[self.stream.id]))
+        self.assertContains(response, '<a class="name" href="https://vk.com/watch"')
+
+    def test_destination_name_plain_text_when_no_viewing_url(self):
+        self.destination.socialmedia_url = ""
+        self.destination.save(update_fields=["socialmedia_url"])
+        self.login(self.user)
+        response = self.client.get(reverse("crud:stream_detail", args=[self.stream.id]))
+        self.assertContains(response, '<span class="name">VK</span>')
+        self.assertNotContains(response, '<a class="name"')
+
     def test_owner_can_toggle_destination(self):
         self.login(self.user)
         toggle_url = reverse("crud:destination_toggle", args=[self.destination.id])

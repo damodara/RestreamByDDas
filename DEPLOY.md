@@ -13,11 +13,11 @@ curl -O https://raw.githubusercontent.com/damodara/RestreamByDDas/master/.env_ex
 cp .env_example .env
 ```
 
-Сгенерировать секреты:
+Сгенерировать секреты (Fernet-ключ генерируется без `cryptography` — её нет в голом `python:3.13-slim`, а сам ключ — это просто base64 от 32 случайных байт):
 
 ```bash
 sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" .env
-sed -i "s|^FIELD_ENCRYPTION_KEY=.*|FIELD_ENCRYPTION_KEY=$(docker run --rm python:3.13-slim python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")|" .env
+sed -i "s|^FIELD_ENCRYPTION_KEY=.*|FIELD_ENCRYPTION_KEY=$(docker run --rm python:3.13-slim python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")|" .env
 sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env
 sed -i "s|^RTMP_HOOK_SECRET=.*|RTMP_HOOK_SECRET=$(openssl rand -hex 32)|" .env
 ```
