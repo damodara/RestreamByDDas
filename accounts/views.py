@@ -1,12 +1,15 @@
 import ipaddress
 
-from django.contrib.auth.views import LoginView, PasswordResetView
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import LoginView, PasswordChangeView, PasswordResetView
 from django.core.cache import cache
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse_lazy
 from django.utils import timezone
 
 from accounts.emails import send_admin_registration_notice, send_user_decision_notice
-from accounts.forms import RegistrationForm
+from accounts.forms import LogRetentionForm, RegistrationForm
 from accounts.models import User
 from accounts.tokens import read_decision_token
 
@@ -164,3 +167,26 @@ def admin_decision(request, action, token):
         "accounts/admin_decision_confirm.html",
         {"user": user, "action": action},
     )
+
+
+@login_required
+def profile(request):
+    if request.method == "POST":
+        form = LogRetentionForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Настройки сохранены.")
+            return redirect("accounts:profile")
+    else:
+        form = LogRetentionForm(instance=request.user)
+    return render(request, "accounts/profile.html", {"form": form})
+
+
+class ProfilePasswordChangeView(PasswordChangeView):
+    template_name = "accounts/password_change_form.html"
+    success_url = reverse_lazy("accounts:profile")
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, "Пароль изменён.")
+        return response

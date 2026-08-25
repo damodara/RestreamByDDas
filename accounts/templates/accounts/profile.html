@@ -1,0 +1,26 @@
+{% extends "crud/base.html" %}
+
+{% block title %}Личный кабинет — RestreamByDDas{% endblock %}
+
+{% block content %}
+	<h1>Личный кабинет</h1>
+
+	<div class="card">
+		<h2 style="margin-top:0">Аккаунт</h2>
+		<p><strong>Логин:</strong> {{ user.username }}</p>
+		<p><strong>Email:</strong> {{ user.email }}</p>
+		<p><a href="{% url 'accounts:password_change' %}">Изменить пароль</a></p>
+	</div>
+
+	<div class="card">
+		<h2 style="margin-top:0">Хранение логов</h2>
+		<form method="post">
+			{% csrf_token %}
+			{{ form.as_p }}
+			<button type="submit">Сохранить</button>
+		</form>
+		<p class="hint">Лог-файлы push-процессов для ваших дестинаций, к которым не было публикаций дольше указанного срока, удаляются автоматически.</p>
+	</div>
+
+	<p><a href="{% url 'crud:index' %}">← Назад к списку</a></p>
+{% endblock %}

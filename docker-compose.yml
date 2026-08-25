@@ -30,9 +30,12 @@ services:
     volumes:
       - static_files:/app/staticfiles
       # Логи push.sh (per-destination ffmpeg) пишутся в контейнере nginx —
-      # общий volume, только на чтение, чтобы Django мог их показать
-      # владельцу дестинации на сайте.
-      - rtmp_logs:/rtmp-logs:ro
+      # общий volume, чтобы Django мог их показать владельцу дестинации на
+      # сайте. Не read-only: cleanup_destination_logs (management-команда,
+      # см. docker-entrypoint.sh) удаляет устаревшие *.log отсюда сама —
+      # но никогда не трогает *.pid (это книга учёта живых push-процессов,
+      # ей распоряжается только push.sh/stop.sh в контейнере nginx).
+      - rtmp_logs:/rtmp-logs
     ports:
       # Только localhost — nginx ходит на django:8000 через внутреннюю
       # docker-сеть по имени сервиса, публикация на 0.0.0.0 тут не нужна

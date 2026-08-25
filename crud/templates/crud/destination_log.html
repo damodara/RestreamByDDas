@@ -1,4 +1,5 @@
 {% extends "crud/base.html" %}
+{% load ru_plural %}
 
 {% block title %}Лог — {{ destination.socialmedia_name }} — RestreamByDDas{% endblock %}
 
@@ -13,7 +14,7 @@
 		{% else %}
 			<p class="empty-state">Лог пуст.</p>
 		{% endif %}
-		<p class="hint">Последние {{ max_lines }} строк ffmpeg-процесса, обслуживающего эту дестинацию. Перезаписывается заново при каждой новой публикации.</p>
+		<p class="hint">Последние {{ max_lines }} строк ffmpeg-процесса, обслуживающего эту дестинацию. Перезаписывается заново при каждой новой публикации. Удаляется автоматически, если публикаций не было дольше {{ request.user.log_retention_days }} {{ request.user.log_retention_days|ru_days }} — изменить срок можно в <a href="{% url 'accounts:profile' %}">личном кабинете</a>.</p>
 	</div>
 
 	<p><a href="{% url 'crud:stream_detail' destination.stream_id %}">← Назад к точке приёма</a></p>

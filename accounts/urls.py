@@ -14,6 +14,12 @@ urlpatterns = [
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("decision/<str:action>/<str:token>/", views.admin_decision, name="decision"),
+    path("profile/", views.profile, name="profile"),
+    path(
+        "profile/password/",
+        views.ProfilePasswordChangeView.as_view(),
+        name="password_change",
+    ),
     path(
         "password-reset/",
         views.ThrottledPasswordResetView.as_view(

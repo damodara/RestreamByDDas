@@ -1,19 +1,23 @@
 import json
+import os
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django import forms
+from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from accounts.models import User
+from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
 from crud.models import Rtmp, Stream
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_stream_stats
 from crud.server_load import get_server_load
+from crud.templatetags.ru_plural import ru_days
 
 HOOK_SECRET = "test-hook-secret"
 STAT_URL = "http://nginx-test/stat"
@@ -412,6 +416,121 @@ class ReadDestinationLogTests(TestCase):
             self.assertEqual(len(result_lines), 500)
             self.assertEqual(result_lines[0], "line100")
             self.assertEqual(result_lines[-1], "line599")
+
+
+class RuDaysFilterTests(TestCase):
+    def test_declension_by_last_digit(self):
+        self.assertEqual(ru_days(1), "день")
+        self.assertEqual(ru_days(21), "день")
+        self.assertEqual(ru_days(2), "дня")
+        self.assertEqual(ru_days(3), "дня")
+        self.assertEqual(ru_days(4), "дня")
+        self.assertEqual(ru_days(5), "дней")
+        self.assertEqual(ru_days(0), "дней")
+
+    def test_teens_are_always_dney(self):
+        # 11-14 — исключение из правила по последней цифре (не "день"/"дня",
+        # хотя 1/2/3/4 сами по себе такие формы дают).
+        for n in (11, 12, 13, 14, 111, 112):
+            self.assertEqual(ru_days(n), "дней")
+
+    def test_non_numeric_falls_back(self):
+        self.assertEqual(ru_days("не число"), "дней")
+
+
+def _age_file(path, days):
+    old_time = time.time() - days * 86400
+    os.utime(path, (old_time, old_time))
+
+
+class CleanupDestinationLogsCommandTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="cleanupowner",
+            email="cleanupowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Cleanup stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def run_cleanup(self, tmp):
+        with patch(
+            "crud.management.commands.cleanup_destination_logs.LOGS_ROOT", Path(tmp)
+        ):
+            call_command("cleanup_destination_logs")
+
+    def test_deletes_log_older_than_owner_retention(self):
+        self.user.log_retention_days = 2
+        self.user.save(update_fields=["log_retention_days"])
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / self.stream.stream_key
+            stream_dir.mkdir()
+            log_file = stream_dir / f"{self.destination.id}.log"
+            log_file.write_text("old")
+            _age_file(log_file, days=3)
+
+            self.run_cleanup(tmp)
+            self.assertFalse(log_file.exists())
+
+    def test_keeps_log_within_owner_retention(self):
+        self.user.log_retention_days = 10
+        self.user.save(update_fields=["log_retention_days"])
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / self.stream.stream_key
+            stream_dir.mkdir()
+            log_file = stream_dir / f"{self.destination.id}.log"
+            log_file.write_text("fresh")
+            _age_file(log_file, days=3)
+
+            self.run_cleanup(tmp)
+            self.assertTrue(log_file.exists())
+
+    def test_orphaned_destination_uses_default_retention(self):
+        stream_key = self.stream.stream_key
+        destination_id = self.destination.id
+        self.destination.delete()
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / stream_key
+            stream_dir.mkdir()
+            log_file = stream_dir / f"{destination_id}.log"
+            log_file.write_text("orphaned")
+            _age_file(log_file, days=DEFAULT_LOG_RETENTION_DAYS + 1)
+
+            self.run_cleanup(tmp)
+            self.assertFalse(log_file.exists())
+
+    def test_never_deletes_pid_files(self):
+        self.user.log_retention_days = 1
+        self.user.save(update_fields=["log_retention_days"])
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / self.stream.stream_key
+            stream_dir.mkdir()
+            pid_file = stream_dir / f"{self.destination.id}.pid"
+            pid_file.write_text("12345")
+            _age_file(pid_file, days=30)
+
+            self.run_cleanup(tmp)
+            self.assertTrue(pid_file.exists())
+
+    def test_removes_now_empty_stream_dir(self):
+        self.user.log_retention_days = 1
+        self.user.save(update_fields=["log_retention_days"])
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / self.stream.stream_key
+            stream_dir.mkdir()
+            log_file = stream_dir / f"{self.destination.id}.log"
+            log_file.write_text("old")
+            _age_file(log_file, days=30)
+
+            self.run_cleanup(tmp)
+            self.assertFalse(stream_dir.exists())
 
 
 class DestinationLogViewTests(TestCase):

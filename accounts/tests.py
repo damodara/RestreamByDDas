@@ -263,3 +263,72 @@ class ClientIpTests(TestCase):
     def test_falls_back_to_remote_addr_without_header(self):
         request = self.factory.get("/", REMOTE_ADDR="172.19.0.4")
         self.assertEqual(client_ip(request), "172.19.0.4")
+
+
+class ProfileTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="profileowner",
+            email="profileowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_requires_login(self):
+        url = reverse("accounts:profile")
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_default_log_retention_is_five_days(self):
+        self.assertEqual(self.user.log_retention_days, 5)
+
+    def test_can_update_log_retention(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("accounts:profile"), {"log_retention_days": 14}
+        )
+        self.assertRedirects(response, reverse("accounts:profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.log_retention_days, 14)
+
+    def test_rejects_out_of_range_log_retention(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("accounts:profile"), {"log_retention_days": 0}
+        )
+        self.user.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.user.log_retention_days, 5)
+
+
+class PasswordChangeTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="pwchangeowner",
+            email="pwchangeowner@example.com",
+            password="oldpass12345",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_requires_login(self):
+        url = reverse("accounts:password_change")
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_can_change_password(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("accounts:password_change"),
+            {
+                "old_password": "oldpass12345",
+                "new_password1": "brand-new-pass-1",
+                "new_password2": "brand-new-pass-1",
+            },
+        )
+        self.assertRedirects(response, reverse("accounts:profile"))
+        self.client.logout()
+        self.assertTrue(
+            self.client.login(username="pwchangeowner", password="brand-new-pass-1")
+        )
