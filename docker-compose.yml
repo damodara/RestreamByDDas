@@ -29,6 +29,10 @@ services:
         condition: service_healthy
     volumes:
       - static_files:/app/staticfiles
+      # Логи push.sh (per-destination ffmpeg) пишутся в контейнере nginx —
+      # общий volume, только на чтение, чтобы Django мог их показать
+      # владельцу дестинации на сайте.
+      - rtmp_logs:/rtmp-logs:ro
     ports:
       # Только localhost — nginx ходит на django:8000 через внутреннюю
       # docker-сеть по имени сервиса, публикация на 0.0.0.0 тут не нужна
@@ -47,6 +51,7 @@ services:
       - django
     volumes:
       - static_files:/static:ro
+      - rtmp_logs:/tmp/rtmp-push
     ports:
       - "80:80"
       - "1935:1935"
@@ -69,3 +74,4 @@ services:
 volumes:
   postgres_data:
   static_files:
+  rtmp_logs:

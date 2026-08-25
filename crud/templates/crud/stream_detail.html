@@ -93,7 +93,7 @@
 							<span class="name">{{ destination.socialmedia_name }}</span>
 						{% endif %}
 						<span data-destination-badge="{{ destination.id }}">
-							{% if stats and stats.live %}
+							{% if stats and stats.live and destination.enabled %}
 								{% if destination.push_status == "live" %}
 									<span class="badge live">в эфире</span>
 								{% elif destination.push_status == "error" %}
@@ -103,6 +103,7 @@
 						</span>
 					</span>
 					<span class="actions">
+						<a href="{% url 'crud:destination_log' destination.id %}">лог</a>
 						<a href="{% url 'crud:destination_update' destination.id %}">изменить</a>
 						<a href="{% url 'crud:destination_delete' destination.id %}">удалить</a>
 					</span>

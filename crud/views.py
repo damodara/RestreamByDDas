@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from crud.destination_logs import MAX_LINES, read_destination_log
 from crud.forms import DestinationForm, StreamForm
 from crud.models import Rtmp, Stream
 from crud.nginx_control import restart_stream
@@ -63,8 +64,12 @@ def _stream_stats(stream):
         {
             "id": d.id,
             # Тот же staleness-guard, что и в шаблоне: статус пуша не
-            # показываем, если по /stat сам стрим сейчас не live.
-            "push_status": d.push_status if live else None,
+            # показываем, если по /stat сам стрим сейчас не live, и не
+            # показываем для выключенной тумблером дестинации — иначе
+            # старый push_status (например "error" от предыдущего сеанса,
+            # из-за которого дестинацию и выключили) продолжал бы висеть
+            # бейджем, хотя в неё сейчас вообще ничего не льётся.
+            "push_status": d.push_status if (live and d.enabled) else None,
         }
         for d in stream.destinations.all()
     ]
@@ -190,6 +195,17 @@ def destination_toggle(request, destination_id):
     destination.enabled = not destination.enabled
     destination.save(update_fields=["enabled"])
     return redirect("crud:stream_detail", stream_id=destination.stream_id)
+
+
+@login_required
+def destination_log(request, destination_id):
+    destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
+    log_text = read_destination_log(destination.stream.stream_key, destination.id)
+    return render(
+        request,
+        "crud/destination_log.html",
+        {"destination": destination, "log_text": log_text, "max_lines": MAX_LINES},
+    )
 
 
 @csrf_exempt

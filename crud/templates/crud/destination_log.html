@@ -1,0 +1,20 @@
+{% extends "crud/base.html" %}
+
+{% block title %}Лог — {{ destination.socialmedia_name }} — RestreamByDDas{% endblock %}
+
+{% block content %}
+	<h1>Лог — {{ destination.socialmedia_name }}</h1>
+
+	<div class="card">
+		{% if log_text is None %}
+			<p class="empty-state">Лога пока нет — публикации с этой дестинацией ещё не было.</p>
+		{% elif log_text %}
+			<pre class="log-view">{{ log_text }}</pre>
+		{% else %}
+			<p class="empty-state">Лог пуст.</p>
+		{% endif %}
+		<p class="hint">Последние {{ max_lines }} строк ffmpeg-процесса, обслуживающего эту дестинацию. Перезаписывается заново при каждой новой публикации.</p>
+	</div>
+
+	<p><a href="{% url 'crud:stream_detail' destination.stream_id %}">← Назад к точке приёма</a></p>
+{% endblock %}

@@ -51,9 +51,9 @@ while [ "$i" -lt "$COUNT" ]; do
         ffmpeg -nostdin -loglevel warning \
             -i "rtmp://127.0.0.1:1935/live/${STREAM_KEY}" \
             -c copy -f flv "$URL" \
-            >"${PID_DIR}/${i}.log" 2>&1 &
+            >"${PID_DIR}/${DEST_ID}.log" 2>&1 &
         FFMPEG_PID=$!
-        echo "$FFMPEG_PID" >"${PID_DIR}/${i}.pid"
+        echo "$FFMPEG_PID" >"${PID_DIR}/${DEST_ID}.pid"
         report_status "$DEST_ID" "live"
 
         set +e
@@ -61,7 +61,7 @@ while [ "$i" -lt "$COUNT" ]; do
         EXIT_CODE=$?
         set -e
 
-        rm -f "${PID_DIR}/${i}.pid"
+        rm -f "${PID_DIR}/${DEST_ID}.pid"
         if [ "$EXIT_CODE" -eq 143 ] || [ "$EXIT_CODE" -eq 137 ]; then
             report_status "$DEST_ID" "stopped"
         else

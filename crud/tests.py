@@ -1,4 +1,6 @@
 import json
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django import forms
@@ -7,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from accounts.models import User
+from crud.destination_logs import read_destination_log
 from crud.models import Rtmp, Stream
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_stream_stats
@@ -383,6 +386,97 @@ class ServerLoadTests(TestCase):
         self.assertIn("disk_used_percent", data)
 
 
+class ReadDestinationLogTests(TestCase):
+    def test_returns_none_when_file_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("crud.destination_logs.LOGS_ROOT", Path(tmp)):
+                self.assertIsNone(read_destination_log("no-such-key", 1))
+
+    def test_returns_file_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / "some-key"
+            stream_dir.mkdir()
+            (stream_dir / "42.log").write_text("line1\nline2\n")
+            with patch("crud.destination_logs.LOGS_ROOT", Path(tmp)):
+                self.assertEqual(read_destination_log("some-key", 42), "line1\nline2")
+
+    def test_truncates_to_last_max_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stream_dir = Path(tmp) / "some-key"
+            stream_dir.mkdir()
+            lines = [f"line{i}" for i in range(600)]
+            (stream_dir / "42.log").write_text("\n".join(lines))
+            with patch("crud.destination_logs.LOGS_ROOT", Path(tmp)):
+                result = read_destination_log("some-key", 42)
+            result_lines = result.split("\n")
+            self.assertEqual(len(result_lines), 500)
+            self.assertEqual(result_lines[0], "line100")
+            self.assertEqual(result_lines[-1], "line599")
+
+
+class DestinationLogViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="logowner",
+            email="logowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="logother",
+            email="logother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Log stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def test_requires_login(self):
+        url = reverse("crud:destination_log", args=[self.destination.id])
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:destination_log", args=[self.destination.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_shows_message_when_no_log_yet(self):
+        self.client.force_login(self.user)
+        with patch("crud.views.read_destination_log", return_value=None):
+            response = self.client.get(
+                reverse("crud:destination_log", args=[self.destination.id])
+            )
+        self.assertContains(response, "публикации с этой дестинацией ещё не было")
+
+    def test_shows_log_contents(self):
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.read_destination_log",
+            return_value="Input #0, flv, from 'rtmp://...'",
+        ):
+            response = self.client.get(
+                reverse("crud:destination_log", args=[self.destination.id])
+            )
+        self.assertContains(response, "Input #0, flv, from")
+
+    def test_stream_detail_links_to_log(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("crud:stream_detail", args=[self.stream.id]))
+        self.assertContains(
+            response,
+            reverse("crud:destination_log", args=[self.destination.id]),
+        )
+
+
 class StreamStatsViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -483,6 +577,20 @@ class DestinationPushStatusDisplayTests(TestCase):
         with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
             response = self.get_detail()
         self.assertNotContains(response, 'class="badge live">в эфире')
+
+    def test_hides_stale_error_badge_for_disabled_destination(self):
+        # Пользователь выключил дестинацию тумблером именно из-за ошибки
+        # пуша — push_status="error" остаётся в БД (toggle его не трогает),
+        # но раз дестинация выключена, в неё больше ничего не льётся и
+        # бейдж не должен вводить в заблуждение, что она всё ещё "в ошибке".
+        self.destination.push_status = Rtmp.PushStatus.ERROR
+        self.destination.enabled = False
+        self.destination.save(update_fields=["push_status", "enabled"])
+        with patch(
+            "crud.views.fetch_stream_stats", return_value={"live": True, **_STATS}
+        ):
+            response = self.get_detail()
+        self.assertNotContains(response, 'class="badge error">ошибка')
 
 
 _STATS = {
@@ -793,6 +901,30 @@ class LiveStatsJsonViewTests(TestCase):
         self.destination.save(update_fields=["push_status"])
         self.client.force_login(self.user)
         with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.client.get(
+                reverse("crud:stream_stats_json", args=[self.stream.id])
+            )
+        data = response.json()
+        self.assertEqual(
+            data["destinations"], [{"id": self.destination.id, "push_status": None}]
+        )
+
+    def test_stream_stats_json_hides_stale_status_for_disabled_destination(self):
+        self.destination.push_status = Rtmp.PushStatus.ERROR
+        self.destination.enabled = False
+        self.destination.save(update_fields=["push_status", "enabled"])
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_stream_stats",
+            return_value={
+                "live": True,
+                "bytes_in": 1000,
+                "bytes_out": 2000,
+                "bw_in": 100,
+                "bw_out": 200,
+                "uptime_seconds": 65,
+            },
+        ):
             response = self.client.get(
                 reverse("crud:stream_stats_json", args=[self.stream.id])
             )
