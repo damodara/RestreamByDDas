@@ -58,9 +58,12 @@ docker compose -f docker-compose.prod.yml up -d
 ### Обновление на новую версию
 
 ```bash
+curl -O https://raw.githubusercontent.com/damodara/RestreamByDDas/master/docker-compose.prod.yml
 docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --force-recreate
 ```
+
+Перекачать сам `docker-compose.prod.yml`, а не только образы, — обязательно: новые версии иногда меняют файл (новые volume'ы и т.п.), а `pull`/`up -d` эти изменения сами не подхватывают. Подробности и осторожности при ручных правках файла — см. [DEPLOY.md](DEPLOY.md).
 
 `pull` обязателен: если образ с нужным тегом (`latest` или конкретная версия) уже есть на машине, `docker compose up -d` его не перекачивает и молча перезапустит контейнеры на том же старом образе — без явного `pull` обновления просто не будет видно.
 

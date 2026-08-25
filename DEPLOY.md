@@ -99,11 +99,19 @@ sudo systemctl reload caddy
 ## Обновление на новую версию
 
 ```bash
+cd /opt/restreambyddas
+cp docker-compose.prod.yml docker-compose.prod.yml.bak
+curl -O https://raw.githubusercontent.com/damodara/RestreamByDDas/master/docker-compose.prod.yml
 docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --force-recreate
 ```
 
-`pull` обязателен — без него `up -d` не подтянет новый образ, если старый уже есть локально.
+Оба шага обязательны, не только `pull`:
+
+- `pull` — без него `up -d` не подтянет новый образ, если старый уже есть локально.
+- Перекачать сам `docker-compose.prod.yml` — новые версии иногда меняют сам файл (новые volume'ы, переменные окружения), а `pull`/`up -d` эти изменения не подхватывают сами — файл на диске обновляется только явным `curl` поверх старого. Если пропустить этот шаг, контейнеры обновятся, но по-прежнему будут работать по старой схеме (например, без свежедобавленного volume) — молча, без ошибки при запуске.
+
+Если правили `docker-compose.prod.yml` вручную (например под свой сервер, как volume'ы `db_data`/`static_data` вместо `postgres_data`/`static_files`) — не затирайте эти правки перекачанным файлом вслепую, сравните `diff docker-compose.prod.yml.bak docker-compose.prod.yml` и перенесите нужное руками.
 
 ## Резервное копирование БД
 
