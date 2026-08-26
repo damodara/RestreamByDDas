@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ from django.utils import timezone
 
 from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
+from crud.destination_test import test_push as test_push_fn
 from crud.emails import send_push_error_email
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
@@ -1964,3 +1966,141 @@ class LiveStatsJsonViewTests(TestCase):
         self.assertEqual(
             data["destinations"], [{"id": self.destination.id, "push_status": None}]
         )
+
+
+class DestinationPresetTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="presetowner",
+            email="presetowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.user)
+        self.stream = Stream.objects.create(owner=self.user, name="Preset stream")
+
+    def test_create_form_includes_presets(self):
+        response = self.client.get(
+            reverse("crud:destination_create", args=[self.stream.id])
+        )
+        self.assertContains(response, "destination-presets-data")
+        self.assertContains(response, "YouTube")
+
+    def test_update_form_includes_presets(self):
+        destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+        response = self.client.get(
+            reverse("crud:destination_update", args=[destination.id])
+        )
+        self.assertContains(response, "destination-presets-data")
+
+
+class DestinationTestPushViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="testpushowner",
+            email="testpushowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="testpushother",
+            email="testpushother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Test push stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_url="https://vk.com/watch",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def test_anonymous_redirects_to_login(self):
+        url = reverse("crud:destination_test_push", args=[self.destination.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:destination_test_push", args=[self.destination.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_not_allowed(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:destination_test_push", args=[self.destination.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_shows_success_message(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:destination_test_push", args=[self.destination.id])
+        with patch(
+            "crud.views.test_push",
+            return_value=(True, "Площадка приняла тестовый поток."),
+        ):
+            response = self.client.post(url, follow=True)
+        self.assertContains(response, "Площадка приняла тестовый поток.")
+
+    def test_shows_failure_message(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:destination_test_push", args=[self.destination.id])
+        with patch(
+            "crud.views.test_push",
+            return_value=(False, "Площадка отклонила подключение."),
+        ):
+            response = self.client.post(url, follow=True)
+        self.assertContains(response, "Площадка отклонила подключение.")
+
+    def test_calls_test_push_with_destination_push_url(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:destination_test_push", args=[self.destination.id])
+        with patch("crud.views.test_push", return_value=(True, "ok")) as mock_test_push:
+            self.client.post(url)
+        mock_test_push.assert_called_once_with(self.destination.push_url)
+
+
+class DestinationTestPushFunctionTests(TestCase):
+    def test_reports_failure_when_ffmpeg_missing(self):
+        with patch(
+            "crud.destination_test.subprocess.run", side_effect=FileNotFoundError
+        ):
+            success, detail = test_push_fn("rtmp://example.com/live/key")
+        self.assertFalse(success)
+        self.assertIn("ffmpeg", detail)
+
+    def test_reports_timeout(self):
+        with patch(
+            "crud.destination_test.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=15),
+        ):
+            success, detail = test_push_fn("rtmp://example.com/live/key")
+        self.assertFalse(success)
+        self.assertIn("время ожидания", detail)
+
+    def test_reports_success_on_zero_exit_code(self):
+        mock_result = MagicMock(returncode=0, stderr="")
+        with patch("crud.destination_test.subprocess.run", return_value=mock_result):
+            success, detail = test_push_fn("rtmp://example.com/live/key")
+        self.assertTrue(success)
+
+    def test_reports_failure_with_last_stderr_line(self):
+        mock_result = MagicMock(
+            returncode=1,
+            stderr="Connecting...\nConnection refused\n",
+        )
+        with patch("crud.destination_test.subprocess.run", return_value=mock_result):
+            success, detail = test_push_fn("rtmp://example.com/live/key")
+        self.assertFalse(success)
+        self.assertEqual(detail, "Connection refused")

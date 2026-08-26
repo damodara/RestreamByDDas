@@ -60,6 +60,11 @@ urlpatterns = [
         name="destination_toggle",
     ),
     path(
+        "destinations/<int:destination_id>/test-push/",
+        views.destination_test_push,
+        name="destination_test_push",
+    ),
+    path(
         "destinations/<int:destination_id>/log/",
         views.destination_log,
         name="destination_log",

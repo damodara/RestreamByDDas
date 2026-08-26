@@ -16,9 +16,13 @@ LABEL org.opencontainers.image.title="RestreamByDDas (Django)" \
 # сам Django (settings.APP_VERSION) — показывается в футере на сайте.
 ENV APP_VERSION=${APP_VERSION}
 
+# ffmpeg — только для crud.destination_test (кнопка "тест" у дестинации,
+# короткий синтетический пуш без реального эфира); сам relay-пайплайн живёт
+# в контейнере nginx (rtmp-push/), это не дублирование той же роли.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 ENV POETRY_VIRTUALENVS_CREATE=false

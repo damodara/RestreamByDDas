@@ -96,6 +96,27 @@ a:hover {
 	text-decoration: underline;
 }
 
+/* Тот же трюк — <button> внутри inline-формы, оформленная как обычная
+   текстовая ссылка, чтобы вписаться в список действий рядом с <a>-шками
+   (лог/изменить/удалить), которым для POST-запроса нужна форма, а не href. */
+.destination-list .actions button.link-button {
+	background: none;
+	border: none;
+	padding: 0;
+	font: inherit;
+	color: var(--accent);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.destination-list .actions button.link-button:hover {
+	text-decoration: underline;
+}
+
+.destination-list .actions form {
+	display: inline;
+}
+
 .container {
 	max-width: 840px;
 	width: 100%;

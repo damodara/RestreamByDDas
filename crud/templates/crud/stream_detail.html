@@ -112,6 +112,7 @@
 	<div class="actions-row">
 		<a class="button" href="{% url 'crud:destination_create' stream.id %}">+ Добавить destination</a>
 	</div>
+	<p class="hint">Кнопка «тест» у дестинации шлёт короткий тестовый ролик напрямую на площадку (без вашего реального эфира), чтобы проверить RTMP-адрес и ключ — занимает несколько секунд.</p>
 
 	{% if stream.destinations.all %}
 		<ul class="destination-list">
@@ -142,6 +143,10 @@
 						</span>
 					</span>
 					<span class="actions">
+						<form action="{% url 'crud:destination_test_push' destination.id %}" method="post">
+							{% csrf_token %}
+							<button type="submit" class="link-button">тест</button>
+						</form>
 						<a href="{% url 'crud:destination_log' destination.id %}">лог</a>
 						<a href="{% url 'crud:destination_update' destination.id %}">изменить</a>
 						<a href="{% url 'crud:destination_delete' destination.id %}">удалить</a>
