@@ -4,6 +4,7 @@ import time
 from django.core.management.base import BaseCommand
 from django.db import OperationalError, connection
 
+from accounts.models import User
 from crud.emails import send_stream_drop_email
 from crud.models import Stream
 from crud.nginx_stat import fetch_live_stream_keys
@@ -19,12 +20,12 @@ class Command(BaseCommand):
         "Раз в SCAN_INTERVAL секунд сверяет потоки с Stream.expected_live="
         "True (см. crud.views.on_publish_hook/stream_end_broadcast) с "
         "реальным списком live stream_key из nginx-rtmp /stat — расхождение "
-        "значит, что публикация оборвалась без явного «Завершить эфир», и "
-        "владельца стоит уведомить, если только он не включил "
-        "accounts.User.auto_end_broadcast_on_drop (тогда флаг просто "
-        "сбрасывается молча). Тот же долгоживущий процесс, что и "
-        "poll_youtube_chat/poll_telegram_bot (см. docker-entrypoint.sh), не "
-        "завершается сам."
+        "значит, что публикация оборвалась без явного «Завершить эфир». "
+        "Stream.expected_live сбрасывается в любом случае; уведомляем "
+        "владельца, только если у него accounts.User.broadcast_end_mode == "
+        "BUTTON (по умолчанию AUTO — сигнал сам по себе штатно завершает "
+        "эфир). Тот же долгоживущий процесс, что и poll_youtube_chat/"
+        "poll_telegram_bot (см. docker-entrypoint.sh), не завершается сам."
     )
 
     def handle(self, *args, **options):
@@ -53,11 +54,15 @@ class Command(BaseCommand):
         )
         for stream in dropped:
             owner = stream.owner
-            # auto_end_broadcast_on_drop — пользователь сам решил, что для
-            # него пропадание сигнала само по себе уже значит "эфир
-            # закончился", а не "инцидент": флаг ниже всё равно сбрасывается,
-            # просто без уведомления.
-            if owner.auto_end_broadcast_on_drop:
+            # AUTO (по умолчанию) — пропадание сигнала само по себе штатно
+            # завершает эфир, никого не уведомляем. BUTTON — эфир считается
+            # завершённым только по явной кнопке, так что пропажа без неё
+            # трактуется как необъявленный обрыв. Флаг ниже сбрасывается в
+            # обоих случаях — Stream.expected_live отражает "идёт ли поток
+            # прямо сейчас", а не "было ли завершение объявлено". Канал
+            # доставки переиспользует notify_on_push_error/
+            # notify_telegram_on_push_error, а не заводит собственный выбор.
+            if owner.broadcast_end_mode != User.BroadcastEndMode.BUTTON:
                 continue
             if owner.notify_on_push_error:
                 send_stream_drop_email(stream)

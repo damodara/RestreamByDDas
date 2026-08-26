@@ -31,5 +31,5 @@ class AccountSettingsForm(forms.ModelForm):
         fields = [
             "log_retention_days",
             "notify_on_push_error",
-            "auto_end_broadcast_on_drop",
+            "broadcast_end_mode",
         ]

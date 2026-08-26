@@ -291,22 +291,29 @@ class ProfileTests(TestCase):
     def test_default_log_retention_is_five_days(self):
         self.assertEqual(self.user.log_retention_days, 5)
 
+    def settings_post(self, **overrides):
+        # broadcast_end_mode — CharField с choices, обязательное поле формы
+        # (не BooleanField-чекбокс, который можно просто опустить) — любой
+        # POST в save_settings должен его нести, иначе settings_form
+        # невалидна и ничего не сохранится.
+        data = {
+            "log_retention_days": 5,
+            "save_settings": "1",
+            "broadcast_end_mode": "auto",
+        }
+        data.update(overrides)
+        return self.client.post(reverse("accounts:profile"), data)
+
     def test_can_update_log_retention(self):
         self.client.force_login(self.user)
-        response = self.client.post(
-            reverse("accounts:profile"),
-            {"log_retention_days": 14, "save_settings": "1"},
-        )
+        response = self.settings_post(log_retention_days=14)
         self.assertRedirects(response, reverse("accounts:profile"))
         self.user.refresh_from_db()
         self.assertEqual(self.user.log_retention_days, 14)
 
     def test_rejects_out_of_range_log_retention(self):
         self.client.force_login(self.user)
-        response = self.client.post(
-            reverse("accounts:profile"),
-            {"log_retention_days": 0, "save_settings": "1"},
-        )
+        response = self.settings_post(log_retention_days=0)
         self.user.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.user.log_retention_days, 5)
@@ -316,14 +323,7 @@ class ProfileTests(TestCase):
 
     def test_can_opt_in_to_push_error_notifications(self):
         self.client.force_login(self.user)
-        self.client.post(
-            reverse("accounts:profile"),
-            {
-                "log_retention_days": 5,
-                "notify_on_push_error": "on",
-                "save_settings": "1",
-            },
-        )
+        self.settings_post(notify_on_push_error="on")
         self.user.refresh_from_db()
         self.assertTrue(self.user.notify_on_push_error)
 
@@ -331,39 +331,26 @@ class ProfileTests(TestCase):
         self.user.notify_on_push_error = True
         self.user.save(update_fields=["notify_on_push_error"])
         self.client.force_login(self.user)
-        self.client.post(
-            reverse("accounts:profile"),
-            {"log_retention_days": 5, "save_settings": "1"},
-        )
+        self.settings_post()
         self.user.refresh_from_db()
         self.assertFalse(self.user.notify_on_push_error)
 
-    def test_auto_end_broadcast_on_drop_defaults_to_true(self):
-        self.assertTrue(self.user.auto_end_broadcast_on_drop)
+    def test_broadcast_end_mode_defaults_to_auto(self):
+        self.assertEqual(self.user.broadcast_end_mode, User.BroadcastEndMode.AUTO)
 
-    def test_can_opt_out_of_auto_end_broadcast_on_drop(self):
+    def test_can_switch_broadcast_end_mode_to_button(self):
         self.client.force_login(self.user)
-        self.client.post(
-            reverse("accounts:profile"),
-            {"log_retention_days": 5, "save_settings": "1"},
-        )
+        self.settings_post(broadcast_end_mode="button")
         self.user.refresh_from_db()
-        self.assertFalse(self.user.auto_end_broadcast_on_drop)
+        self.assertEqual(self.user.broadcast_end_mode, User.BroadcastEndMode.BUTTON)
 
-    def test_can_opt_back_in_to_auto_end_broadcast_on_drop(self):
-        self.user.auto_end_broadcast_on_drop = False
-        self.user.save(update_fields=["auto_end_broadcast_on_drop"])
+    def test_can_switch_broadcast_end_mode_back_to_auto(self):
+        self.user.broadcast_end_mode = User.BroadcastEndMode.BUTTON
+        self.user.save(update_fields=["broadcast_end_mode"])
         self.client.force_login(self.user)
-        self.client.post(
-            reverse("accounts:profile"),
-            {
-                "log_retention_days": 5,
-                "auto_end_broadcast_on_drop": "on",
-                "save_settings": "1",
-            },
-        )
+        self.settings_post(broadcast_end_mode="auto")
         self.user.refresh_from_db()
-        self.assertTrue(self.user.auto_end_broadcast_on_drop)
+        self.assertEqual(self.user.broadcast_end_mode, User.BroadcastEndMode.AUTO)
 
     def test_can_update_username_immediately(self):
         self.client.force_login(self.user)

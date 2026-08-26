@@ -1938,15 +1938,10 @@ class StreamDropTelegramTests(TestCase):
 
 class PollStreamHealthCommandTests(TestCase):
     def setUp(self):
-        # auto_end_broadcast_on_drop defaults to True — explicitly off here
-        # so most of this class's tests (about the notify path) aren't
-        # short-circuited by the default; test_clears_flag_without_notifying_
-        # when_auto_end_enabled below is the one that turns it back on.
         self.user = User.objects.create_user(
             username="healthowner",
             email="healthowner@example.com",
             password="ownerpass123",
-            auto_end_broadcast_on_drop=False,
         )
         self.stream = Stream.objects.create(
             owner=self.user, name="Health stream", expected_live=True
@@ -2003,11 +1998,13 @@ class PollStreamHealthCommandTests(TestCase):
         mock_email.assert_not_called()
 
     def test_notifies_and_clears_flag_on_unexpected_drop(self):
+        self.user.broadcast_end_mode = User.BroadcastEndMode.BUTTON
         self.user.notify_on_push_error = True
         self.user.telegram_chat_id = "24680"
         self.user.notify_telegram_on_push_error = True
         self.user.save(
             update_fields=[
+                "broadcast_end_mode",
                 "notify_on_push_error",
                 "telegram_chat_id",
                 "notify_telegram_on_push_error",
@@ -2032,8 +2029,9 @@ class PollStreamHealthCommandTests(TestCase):
         self.assertFalse(self.stream.expected_live)
 
     def test_does_not_renotify_on_second_tick(self):
+        self.user.broadcast_end_mode = User.BroadcastEndMode.BUTTON
         self.user.notify_on_push_error = True
-        self.user.save(update_fields=["notify_on_push_error"])
+        self.user.save(update_fields=["broadcast_end_mode", "notify_on_push_error"])
         with (
             patch(
                 "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
@@ -2048,12 +2046,11 @@ class PollStreamHealthCommandTests(TestCase):
             command._tick()
         self.assertEqual(mock_email.call_count, 1)
 
-    def test_clears_flag_without_notifying_when_auto_end_enabled(self):
+    def test_clears_flag_without_notifying_when_mode_is_auto(self):
+        # broadcast_end_mode defaults to AUTO — a channel toggle being on
+        # (notify_on_push_error) alone must not be enough to notify.
         self.user.notify_on_push_error = True
-        self.user.auto_end_broadcast_on_drop = True
-        self.user.save(
-            update_fields=["notify_on_push_error", "auto_end_broadcast_on_drop"]
-        )
+        self.user.save(update_fields=["notify_on_push_error"])
         with (
             patch(
                 "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
