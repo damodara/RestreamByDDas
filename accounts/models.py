@@ -42,3 +42,20 @@ class User(AbstractUser):
         help_text="Письмо придёт не чаще раза на инцидент — при переходе "
         "дестинации в статус «Ошибка», а не на каждую повторную попытку.",
     )
+    # Заполняется accounts.management.commands.poll_telegram_bot при
+    # получении /start <токен> от пользователя (deep-link из личного
+    # кабинета) — сам Bot API не даёт написать пользователю первым, пока он
+    # не напишет боту, так что chat_id мы не выбираем, а только принимаем.
+    # Пусто = Telegram не привязан.
+    telegram_chat_id = models.CharField(
+        max_length=32, blank=True, verbose_name="Telegram chat ID"
+    )
+    # Независимый чекбокс от notify_on_push_error (не единый выбор канала)
+    # — пользователь может хотеть оба сразу (email как архив, Telegram как
+    # мгновенный сигнал) или только один.
+    notify_telegram_on_push_error = models.BooleanField(
+        default=False,
+        verbose_name="Уведомлять в Telegram при ошибке пуша",
+        help_text="Нужно сначала привязать Telegram ниже. Тот же принцип "
+        "«раз на инцидент», что и у email-уведомлений.",
+    )

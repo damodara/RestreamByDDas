@@ -17,6 +17,31 @@
 	</div>
 
 	<div class="card">
+		<h2 style="margin-top:0">Telegram</h2>
+		{% if user.telegram_chat_id %}
+			<p>Telegram подключён.</p>
+			<form method="post" action="{% url 'accounts:telegram_notify_toggle' %}">
+				{% csrf_token %}
+				<label class="toggle-switch" title="{% if user.notify_telegram_on_push_error %}Нажмите, чтобы выключить{% else %}Нажмите, чтобы включить{% endif %}">
+					<input type="checkbox" {% if user.notify_telegram_on_push_error %}checked{% endif %} onchange="this.form.requestSubmit()">
+					<span class="toggle-slider"></span>
+				</label>
+				<span>Уведомлять в Telegram при ошибке пуша</span>
+			</form>
+			<form method="post" action="{% url 'accounts:telegram_unlink' %}" onsubmit="return confirm('Отключить Telegram? Уведомления в Telegram перестанут приходить.')" style="margin-top:12px">
+				{% csrf_token %}
+				<button type="submit" class="button secondary">Отключить Telegram</button>
+			</form>
+		{% elif telegram_bot_username %}
+			<p>Подключите Telegram, чтобы получать уведомления об ошибке пуша мгновенно, а не только на email.</p>
+			<a class="button" href="https://t.me/{{ telegram_bot_username }}?start={{ telegram_link_token }}" target="_blank" rel="noopener noreferrer">Подключить Telegram</a>
+			<p class="hint">Откроется Telegram — нажмите «Start» в чате с ботом. Ссылка действительна 15 минут, истёкшую можно обновить, перезагрузив эту страницу.</p>
+		{% else %}
+			<p class="hint">Telegram-бот не настроен на сервере.</p>
+		{% endif %}
+	</div>
+
+	<div class="card">
 		<h2 style="margin-top:0">Настройки</h2>
 		<form method="post">
 			{% csrf_token %}

@@ -199,6 +199,18 @@ SRT_PORT = os.getenv("SRT_PORT", "8890")
 # (тот же fail-soft паттерн, что у NGINX_STAT_URL/NGINX_CONTROL_URL).
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
+# Telegram-уведомления об ошибке пуша (accounts.User.notify_telegram_on_push_error)
+# Токен бота (от @BotFather) — сервер-уровня, один бот на весь проект;
+# каждый пользователь привязывает СВОЙ chat_id через deep-link /start в
+# личном кабинете (accounts.telegram_bot, accounts.tokens). Username бота
+# (без @) нужен отдельно от токена только для того, чтобы построить
+# ссылку t.me/<username>?start=... в шаблоне — Bot API не отдаёт его по
+# токену без лишнего вызова getMe при каждом рендере профиля.
+# Пусто = функциональность недоступна, тот же fail-soft паттерн, что и у
+# YOUTUBE_API_KEY/NGINX_STAT_URL.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+
 # Версия релиза — не пользовательская настройка, а метаданные сборки:
 # Dockerfile прописывает её через ENV APP_VERSION (сам ARG приходит из
 # docker-publish.yml, значение = git-тег релиза, например "v1.2.3").

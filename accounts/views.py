@@ -1,5 +1,6 @@
 import ipaddress
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, PasswordChangeView, PasswordResetView
@@ -7,6 +8,7 @@ from django.core.cache import cache
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from accounts.emails import (
     send_admin_registration_notice,
@@ -16,7 +18,11 @@ from accounts.emails import (
 )
 from accounts.forms import AccountIdentityForm, AccountSettingsForm, RegistrationForm
 from accounts.models import User
-from accounts.tokens import read_decision_token, read_email_change_token
+from accounts.tokens import (
+    make_telegram_link_token,
+    read_decision_token,
+    read_email_change_token,
+)
 
 
 def client_ip(request):
@@ -213,11 +219,47 @@ def profile(request):
     else:
         identity_form = AccountIdentityForm(instance=request.user)
         settings_form = AccountSettingsForm(instance=request.user)
+
+    # Ссылка нужна только пока Telegram ещё не привязан — генерируем заново
+    # при каждой загрузке страницы (дёшево, чистая подпись без обращения к
+    # БД/сети), так что истёкшую ссылку не нужно ничем "продлевать",
+    # достаточно просто обновить страницу.
+    telegram_link_token = None
+    if settings.TELEGRAM_BOT_USERNAME and not request.user.telegram_chat_id:
+        telegram_link_token = make_telegram_link_token(request.user)
+
     return render(
         request,
         "accounts/profile.html",
-        {"identity_form": identity_form, "settings_form": settings_form},
+        {
+            "identity_form": identity_form,
+            "settings_form": settings_form,
+            "telegram_bot_username": settings.TELEGRAM_BOT_USERNAME,
+            "telegram_link_token": telegram_link_token,
+        },
     )
+
+
+@login_required
+@require_POST
+def telegram_notify_toggle(request):
+    request.user.notify_telegram_on_push_error = (
+        not request.user.notify_telegram_on_push_error
+    )
+    request.user.save(update_fields=["notify_telegram_on_push_error"])
+    return redirect("accounts:profile")
+
+
+@login_required
+@require_POST
+def telegram_unlink(request):
+    request.user.telegram_chat_id = ""
+    request.user.notify_telegram_on_push_error = False
+    request.user.save(
+        update_fields=["telegram_chat_id", "notify_telegram_on_push_error"]
+    )
+    messages.success(request, "Telegram отключён.")
+    return redirect("accounts:profile")
 
 
 def confirm_email_change(request, token):

@@ -26,6 +26,16 @@ urlpatterns = [
         name="password_change",
     ),
     path(
+        "profile/telegram/toggle/",
+        views.telegram_notify_toggle,
+        name="telegram_notify_toggle",
+    ),
+    path(
+        "profile/telegram/unlink/",
+        views.telegram_unlink,
+        name="telegram_unlink",
+    ),
+    path(
         "password-reset/",
         views.ThrottledPasswordResetView.as_view(
             template_name="accounts/password_reset_form.html",

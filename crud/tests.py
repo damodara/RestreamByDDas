@@ -19,6 +19,7 @@ from crud.destination_logs import read_destination_log
 from crud.destination_test import test_push as test_push_fn
 from crud.destination_test import test_push_many
 from crud.emails import send_push_error_email
+from crud.telegram_alerts import send_push_error_telegram
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
@@ -615,6 +616,60 @@ class RtmpHooksTests(TestCase):
         self.post_status(self.destination.id, "live")
         self.post_status(self.destination.id, "error")
         self.assertEqual(len(mail.outbox), 2)
+
+    def test_status_hook_sends_telegram_on_error_when_opted_in_and_linked(self):
+        self.user.telegram_chat_id = "12345"
+        self.user.notify_telegram_on_push_error = True
+        self.user.save(
+            update_fields=["telegram_chat_id", "notify_telegram_on_push_error"]
+        )
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            self.post_status(self.destination.id, "error")
+        mock_send.assert_called_once()
+        chat_id, text = mock_send.call_args.args
+        self.assertEqual(chat_id, "12345")
+        self.assertIn("VK", text)
+
+    def test_status_hook_does_not_telegram_when_not_opted_in(self):
+        self.user.telegram_chat_id = "12345"
+        self.user.save(update_fields=["telegram_chat_id"])
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            self.post_status(self.destination.id, "error")
+        mock_send.assert_not_called()
+
+    def test_status_hook_does_not_telegram_when_opted_in_but_not_linked(self):
+        self.user.notify_telegram_on_push_error = True
+        self.user.save(update_fields=["notify_telegram_on_push_error"])
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            self.post_status(self.destination.id, "error")
+        mock_send.assert_not_called()
+
+    def test_status_hook_only_telegrams_on_edge_transition_to_error(self):
+        self.user.telegram_chat_id = "12345"
+        self.user.notify_telegram_on_push_error = True
+        self.user.save(
+            update_fields=["telegram_chat_id", "notify_telegram_on_push_error"]
+        )
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            self.post_status(self.destination.id, "error")
+            self.post_status(self.destination.id, "error")
+        self.assertEqual(mock_send.call_count, 1)
+
+    def test_status_hook_sends_both_channels_when_both_opted_in(self):
+        self.user.notify_on_push_error = True
+        self.user.telegram_chat_id = "12345"
+        self.user.notify_telegram_on_push_error = True
+        self.user.save(
+            update_fields=[
+                "notify_on_push_error",
+                "telegram_chat_id",
+                "notify_telegram_on_push_error",
+            ]
+        )
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            self.post_status(self.destination.id, "error")
+        self.assertEqual(len(mail.outbox), 1)
+        mock_send.assert_called_once()
 
 
 class NginxStatTests(TestCase):
@@ -1705,6 +1760,48 @@ class PushErrorEmailTests(TestCase):
         self.user.save(update_fields=["email"])
         send_push_error_email(self.destination)
         self.assertEqual(len(mail.outbox), 0)
+
+
+class PushErrorTelegramTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="telegramowner",
+            email="telegramowner@example.com",
+            password="ownerpass123",
+            telegram_chat_id="98765",
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Telegram stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    def test_skips_when_owner_has_no_chat_id(self):
+        self.user.telegram_chat_id = ""
+        self.user.save(update_fields=["telegram_chat_id"])
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            send_push_error_telegram(self.destination)
+        mock_send.assert_not_called()
+
+    @override_settings(SITE_URL="")
+    def test_sends_without_link_when_site_url_unset(self):
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            send_push_error_telegram(self.destination)
+        mock_send.assert_called_once()
+        chat_id, text = mock_send.call_args.args
+        self.assertEqual(chat_id, "98765")
+        self.assertNotIn("http", text)
+
+    @override_settings(SITE_URL="http://example.com")
+    def test_includes_link_when_site_url_set(self):
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            send_push_error_telegram(self.destination)
+        _, text = mock_send.call_args.args
+        self.assertIn(
+            f"http://example.com/crud/destinations/{self.destination.id}/log/", text
+        )
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)

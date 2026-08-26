@@ -48,4 +48,15 @@ python manage.py cleanup_destination_logs || true
     done
 ) &
 
+# Тот же принцип, для Telegram-бота (accounts.telegram_bot/поллинг
+# getUpdates) — тоже долгоживущий процесс, тоже перезапускается сам при
+# падении. Ничего не делает и не жжёт CPU, пока TELEGRAM_BOT_TOKEN не
+# задан (см. accounts.management.commands.poll_telegram_bot).
+(
+    while true; do
+        python manage.py poll_telegram_bot || true
+        sleep 5
+    done
+) &
+
 exec python manage.py runserver 0.0.0.0:8000

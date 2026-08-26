@@ -15,6 +15,7 @@ from crud.destination_logs import MAX_LINES, read_destination_log
 from crud.destination_presets import DESTINATION_PRESETS
 from crud.destination_test import test_push, test_push_many
 from crud.emails import send_push_error_email
+from crud.telegram_alerts import send_push_error_telegram
 from crud.forms import DestinationForm, StreamChatForm, StreamForm
 from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
 from crud.nginx_control import restart_stream
@@ -446,12 +447,14 @@ def destination_status_hook(request):
     Rtmp.objects.filter(pk=destination.pk).update(
         push_status=status, push_status_at=timezone.now()
     )
-    if (
-        status == Rtmp.PushStatus.ERROR
-        and not was_error
-        and destination.stream.owner.notify_on_push_error
-    ):
-        send_push_error_email(destination)
+    if status == Rtmp.PushStatus.ERROR and not was_error:
+        owner = destination.stream.owner
+        if owner.notify_on_push_error:
+            send_push_error_email(destination)
+        # Независимо от email-опции — пользователь может хотеть оба канала
+        # сразу или только один (см. accounts.models.User).
+        if owner.notify_telegram_on_push_error:
+            send_push_error_telegram(destination)
     return HttpResponse(status=200)
 
 

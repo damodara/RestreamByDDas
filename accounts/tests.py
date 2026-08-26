@@ -1,13 +1,21 @@
+from unittest.mock import patch
+
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
 from django.core.cache import cache
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 from accounts.models import User
-from accounts.tokens import make_decision_token, make_email_change_token
+from accounts.telegram_bot import get_updates, send_message
+from accounts.tokens import (
+    make_decision_token,
+    make_email_change_token,
+    make_telegram_link_token,
+    read_telegram_link_token,
+)
 from accounts.views import (
     LOGIN_THROTTLE_LIMIT,
     PASSWORD_RESET_THROTTLE_LIMIT,
@@ -383,6 +391,199 @@ class ProfileTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, "profileowner@example.com")
         self.assertEqual(len(mail.outbox), 0)
+
+
+class ProfileTelegramTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="tgowner",
+            email="tgowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.user)
+
+    @override_settings(TELEGRAM_BOT_USERNAME="")
+    def test_shows_not_configured_message_without_bot_username(self):
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertContains(response, "Telegram-бот не настроен")
+
+    @override_settings(TELEGRAM_BOT_USERNAME="restream_bot")
+    def test_shows_connect_link_when_not_linked(self):
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertContains(response, "https://t.me/restream_bot?start=")
+
+    @override_settings(TELEGRAM_BOT_USERNAME="restream_bot")
+    def test_shows_connected_state_when_linked(self):
+        self.user.telegram_chat_id = "555"
+        self.user.save(update_fields=["telegram_chat_id"])
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertContains(response, "Telegram подключён")
+        self.assertNotContains(response, "https://t.me/restream_bot?start=")
+
+    def test_notify_toggle_requires_login(self):
+        self.client.logout()
+        url = reverse("accounts:telegram_notify_toggle")
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_notify_toggle_flips_setting(self):
+        self.assertFalse(self.user.notify_telegram_on_push_error)
+        self.client.post(reverse("accounts:telegram_notify_toggle"))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.notify_telegram_on_push_error)
+        self.client.post(reverse("accounts:telegram_notify_toggle"))
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.notify_telegram_on_push_error)
+
+    def test_unlink_clears_chat_id_and_notify_flag(self):
+        self.user.telegram_chat_id = "555"
+        self.user.notify_telegram_on_push_error = True
+        self.user.save(
+            update_fields=["telegram_chat_id", "notify_telegram_on_push_error"]
+        )
+        response = self.client.post(reverse("accounts:telegram_unlink"), follow=True)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.telegram_chat_id, "")
+        self.assertFalse(self.user.notify_telegram_on_push_error)
+        self.assertContains(response, "Telegram отключён")
+
+
+class TelegramLinkTokenTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="tokenowner",
+            email="tokenowner@example.com",
+            password="ownerpass123",
+        )
+
+    def test_round_trip(self):
+        token = make_telegram_link_token(self.user)
+        self.assertEqual(read_telegram_link_token(token), self.user.pk)
+
+    def test_rejects_invalid_token(self):
+        self.assertIsNone(read_telegram_link_token("not-a-real-token"))
+
+
+class TelegramBotApiTests(TestCase):
+    @override_settings(TELEGRAM_BOT_TOKEN="")
+    def test_send_message_returns_false_without_token(self):
+        with patch("accounts.telegram_bot.urllib.request.urlopen") as mock_urlopen:
+            self.assertFalse(send_message("123", "hi"))
+            mock_urlopen.assert_not_called()
+
+    @override_settings(TELEGRAM_BOT_TOKEN="test-token")
+    def test_send_message_returns_true_on_ok_response(self):
+        mock_response = MockResponse(b'{"ok": true}')
+        with patch(
+            "accounts.telegram_bot.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertTrue(send_message("123", "hi"))
+
+    @override_settings(TELEGRAM_BOT_TOKEN="test-token")
+    def test_send_message_returns_false_on_network_error(self):
+        with patch("accounts.telegram_bot.urllib.request.urlopen", side_effect=OSError):
+            self.assertFalse(send_message("123", "hi"))
+
+    @override_settings(TELEGRAM_BOT_TOKEN="")
+    def test_get_updates_returns_empty_list_without_token(self):
+        with patch("accounts.telegram_bot.urllib.request.urlopen") as mock_urlopen:
+            self.assertEqual(get_updates(0), [])
+            mock_urlopen.assert_not_called()
+
+    @override_settings(TELEGRAM_BOT_TOKEN="test-token")
+    def test_get_updates_returns_results_on_ok_response(self):
+        mock_response = MockResponse(b'{"ok": true, "result": [{"update_id": 1}]}')
+        with patch(
+            "accounts.telegram_bot.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertEqual(get_updates(0), [{"update_id": 1}])
+
+
+class MockResponse:
+    """Минимальная замена контекст-менеджера urlopen — только .read() и
+    вход/выход в `with`, как и у настоящего HTTPResponse в этих тестах."""
+
+    def __init__(self, body):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class PollTelegramBotCommandTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="botlinkowner",
+            email="botlinkowner@example.com",
+            password="ownerpass123",
+        )
+
+    def make_command(self):
+        from accounts.management.commands.poll_telegram_bot import Command
+
+        return Command()
+
+    def test_links_chat_id_on_valid_start_token(self):
+        token = make_telegram_link_token(self.user)
+        with patch(
+            "accounts.management.commands.poll_telegram_bot.send_message"
+        ) as mock_send:
+            self.make_command()._handle_update(
+                {
+                    "update_id": 1,
+                    "message": {"text": f"/start {token}", "chat": {"id": 777}},
+                }
+            )
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.telegram_chat_id, "777")
+        mock_send.assert_called_once()
+
+    def test_ignores_non_start_messages(self):
+        with patch(
+            "accounts.management.commands.poll_telegram_bot.send_message"
+        ) as mock_send:
+            self.make_command()._handle_update(
+                {
+                    "update_id": 1,
+                    "message": {"text": "привет", "chat": {"id": 777}},
+                }
+            )
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.telegram_chat_id, "")
+        mock_send.assert_not_called()
+
+    def test_start_without_token_sends_instructions(self):
+        with patch(
+            "accounts.management.commands.poll_telegram_bot.send_message"
+        ) as mock_send:
+            self.make_command()._handle_update(
+                {"update_id": 1, "message": {"text": "/start", "chat": {"id": 777}}}
+            )
+        mock_send.assert_called_once()
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.telegram_chat_id, "")
+
+    def test_start_with_invalid_token_sends_expired_message(self):
+        with patch(
+            "accounts.management.commands.poll_telegram_bot.send_message"
+        ) as mock_send:
+            self.make_command()._handle_update(
+                {
+                    "update_id": 1,
+                    "message": {"text": "/start not-a-real-token", "chat": {"id": 777}},
+                }
+            )
+        mock_send.assert_called_once()
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.telegram_chat_id, "")
 
 
 class EmailChangeConfirmationTests(TestCase):
