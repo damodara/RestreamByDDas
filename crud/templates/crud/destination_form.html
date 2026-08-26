@@ -1,10 +1,24 @@
 {% extends "crud/base.html" %}
+{% load static %}
 
 {% block title %}Destination — {{ stream.name }}{% endblock %}
 
 {% block content %}
 	<h1>Destination для «{{ stream.name }}»</h1>
 	<div class="card">
+		{% if presets %}
+			<p>
+				<label for="destination-preset">Площадка</label>
+				<select id="destination-preset">
+					<option value="">— выбрать вручную —</option>
+					{% for preset in presets %}
+						<option value="{{ forloop.counter0 }}">{{ preset.name }}</option>
+					{% endfor %}
+				</select>
+			</p>
+			<p class="hint">Подставляет название и RTMP-адрес площадки — ключ всё равно нужно взять со стороны площадки и вписать самостоятельно.</p>
+			{{ presets|json_script:"destination-presets-data" }}
+		{% endif %}
 		<form method="post">
 			{% csrf_token %}
 			{{ form.as_p }}
@@ -12,4 +26,5 @@
 		</form>
 	</div>
 	<p><a href="{% url 'crud:stream_detail' stream.id %}">← Назад к точке приёма</a></p>
+	<script src="{% static 'crud/destination_preset.js' %}"></script>
 {% endblock %}

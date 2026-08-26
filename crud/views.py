@@ -12,6 +12,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from crud.destination_logs import MAX_LINES, read_destination_log
+from crud.destination_presets import DESTINATION_PRESETS
+from crud.destination_test import test_push
 from crud.emails import send_push_error_email
 from crud.forms import DestinationForm, StreamChatForm, StreamForm
 from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
@@ -286,7 +288,9 @@ def destination_create(request, stream_id):
     else:
         form = DestinationForm()
     return render(
-        request, "crud/destination_form.html", {"form": form, "stream": stream}
+        request,
+        "crud/destination_form.html",
+        {"form": form, "stream": stream, "presets": DESTINATION_PRESETS},
     )
 
 
@@ -305,7 +309,7 @@ def destination_update(request, destination_id):
     return render(
         request,
         "crud/destination_form.html",
-        {"form": form, "stream": destination.stream},
+        {"form": form, "stream": destination.stream, "presets": DESTINATION_PRESETS},
     )
 
 
@@ -333,6 +337,18 @@ def destination_toggle(request, destination_id):
         messages.success(request, f"«{destination.socialmedia_name}» включена.")
     else:
         messages.success(request, f"«{destination.socialmedia_name}» выключена.")
+    return redirect("crud:stream_detail", stream_id=destination.stream_id)
+
+
+@login_required
+@require_POST
+def destination_test_push(request, destination_id):
+    destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
+    success, detail = test_push(destination.push_url)
+    if success:
+        messages.success(request, f"«{destination.socialmedia_name}»: {detail}")
+    else:
+        messages.error(request, f"«{destination.socialmedia_name}»: {detail}")
     return redirect("crud:stream_detail", stream_id=destination.stream_id)
 
 
