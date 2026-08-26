@@ -64,6 +64,23 @@ docker compose -f docker-compose.prod.yml ps
 curl -I http://localhost/accounts/login/
 ```
 
+## Telegram-уведомления об ошибке пуша (опционально)
+
+По умолчанию выключены — работают только при заполненных `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` в `.env`, один бот на весь сервер, каждый пользователь подключает его к своему аккаунту сам.
+
+1. В Telegram написать [@BotFather](https://t.me/BotFather) → `/newbot`, задать имя и username (должен заканчиваться на `bot`, например `MyRestreamBot`). BotFather сразу выдаст токен и покажет username.
+2. Вписать оба значения в `.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=<токен от BotFather>
+   TELEGRAM_BOT_USERNAME=<username без @>
+   ```
+3. Перезапустить `django` (он же поднимает фоновый процесс `poll_telegram_bot`):
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d --force-recreate django
+   ```
+
+После этого каждый пользователь сам подключает Telegram в личном кабинете (`/accounts/profile/` → «Подключить Telegram») и включает уведомления галочкой — без участия администратора.
+
 ## HTTPS
 
 Этот стек сам по себе не терминирует TLS — nginx здесь настроен только для RTMP-приёма и plain HTTP-проксирования на порт 80, сертификатов и HTTPS в нём нет. Значит:
