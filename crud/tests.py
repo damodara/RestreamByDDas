@@ -1938,10 +1938,15 @@ class StreamDropTelegramTests(TestCase):
 
 class PollStreamHealthCommandTests(TestCase):
     def setUp(self):
+        # auto_end_broadcast_on_drop defaults to True — explicitly off here
+        # so most of this class's tests (about the notify path) aren't
+        # short-circuited by the default; test_clears_flag_without_notifying_
+        # when_auto_end_enabled below is the one that turns it back on.
         self.user = User.objects.create_user(
             username="healthowner",
             email="healthowner@example.com",
             password="ownerpass123",
+            auto_end_broadcast_on_drop=False,
         )
         self.stream = Stream.objects.create(
             owner=self.user, name="Health stream", expected_live=True
