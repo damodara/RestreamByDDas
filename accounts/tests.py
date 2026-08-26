@@ -357,8 +357,10 @@ class ProfileTests(TestCase):
         self.assertRedirects(response, reverse("accounts:profile"))
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, "profileowner@example.com")
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].to, ["newemail@example.com"])
+        self.assertEqual(len(mail.outbox), 2)
+        confirmation, alert = mail.outbox
+        self.assertEqual(confirmation.to, ["newemail@example.com"])
+        self.assertEqual(alert.to, ["profileowner@example.com"])
 
     def test_rejects_duplicate_email_on_identity_update(self):
         User.objects.create_user(

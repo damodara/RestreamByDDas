@@ -61,6 +61,28 @@ def send_email_change_confirmation(request, user, new_email):
     )
 
 
+def send_email_change_alert(user, old_email, new_email):
+    """Уведомление на СТАРЫЙ адрес о том, что запрошена смена email — сама
+    смена ждёт перехода по ссылке из send_email_change_confirmation (на
+    новый адрес), но без этого письма владелец старого адреса вообще не
+    узнал бы о попытке смены (например, при захвате чужой сессии), пока
+    email уже не поменяют и вход/сброс пароля не перестанут работать.
+    Без ссылки отмены — самого механизма отмены пока нет, только сигнал
+    "если это не вы — смените пароль"."""
+    if not old_email:
+        return
+    body = render_to_string(
+        "accounts/email/email_change_alert.txt",
+        {"user": user, "new_email": new_email},
+    )
+    send_mail(
+        subject="Запрошена смена email вашего аккаунта",
+        message=body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[old_email],
+    )
+
+
 def send_user_decision_notice(user, approved):
     template = (
         "accounts/email/user_approved.txt"

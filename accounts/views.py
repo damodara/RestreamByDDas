@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from accounts.emails import (
     send_admin_registration_notice,
+    send_email_change_alert,
     send_email_change_confirmation,
     send_user_decision_notice,
 )
@@ -192,6 +193,7 @@ def profile(request):
             request.user.save(update_fields=["username", "email"])
             if new_email != current_email:
                 send_email_change_confirmation(request, request.user, new_email)
+                send_email_change_alert(request.user, current_email, new_email)
                 messages.success(
                     request,
                     f"На адрес {new_email} отправлено письмо для подтверждения. "
