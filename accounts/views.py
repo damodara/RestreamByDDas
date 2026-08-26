@@ -9,7 +9,7 @@ from django.urls import reverse_lazy
 from django.utils import timezone
 
 from accounts.emails import send_admin_registration_notice, send_user_decision_notice
-from accounts.forms import AccountSettingsForm, RegistrationForm
+from accounts.forms import AccountIdentityForm, AccountSettingsForm, RegistrationForm
 from accounts.models import User
 from accounts.tokens import read_decision_token
 
@@ -171,15 +171,32 @@ def admin_decision(request, action, token):
 
 @login_required
 def profile(request):
-    if request.method == "POST":
-        form = AccountSettingsForm(request.POST, instance=request.user)
-        if form.is_valid():
-            form.save()
+    # Два независимых POST-действия на одной странице (аккаунт и настройки)
+    # различаются по имени нажатой кнопки — иначе пришлось бы либо разносить
+    # их на отдельные URL, либо валидировать и сохранять оба ModelForm разом
+    # при каждом сабмите.
+    if request.method == "POST" and "save_identity" in request.POST:
+        identity_form = AccountIdentityForm(request.POST, instance=request.user)
+        if identity_form.is_valid():
+            identity_form.save()
+            messages.success(request, "Данные аккаунта обновлены.")
+            return redirect("accounts:profile")
+        settings_form = AccountSettingsForm(instance=request.user)
+    elif request.method == "POST" and "save_settings" in request.POST:
+        settings_form = AccountSettingsForm(request.POST, instance=request.user)
+        if settings_form.is_valid():
+            settings_form.save()
             messages.success(request, "Настройки сохранены.")
             return redirect("accounts:profile")
+        identity_form = AccountIdentityForm(instance=request.user)
     else:
-        form = AccountSettingsForm(instance=request.user)
-    return render(request, "accounts/profile.html", {"form": form})
+        identity_form = AccountIdentityForm(instance=request.user)
+        settings_form = AccountSettingsForm(instance=request.user)
+    return render(
+        request,
+        "accounts/profile.html",
+        {"identity_form": identity_form, "settings_form": settings_form},
+    )
 
 
 class ProfilePasswordChangeView(PasswordChangeView):

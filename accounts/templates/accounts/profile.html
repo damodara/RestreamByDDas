@@ -7,8 +7,11 @@
 
 	<div class="card">
 		<h2 style="margin-top:0">Аккаунт</h2>
-		<p><strong>Логин:</strong> {{ user.username }}</p>
-		<p><strong>Email:</strong> {{ user.email }}</p>
+		<form method="post">
+			{% csrf_token %}
+			{{ identity_form.as_p }}
+			<button type="submit" name="save_identity" value="1">Сохранить</button>
+		</form>
 		<p><a href="{% url 'accounts:password_change' %}">Изменить пароль</a></p>
 	</div>
 
@@ -16,8 +19,8 @@
 		<h2 style="margin-top:0">Настройки</h2>
 		<form method="post">
 			{% csrf_token %}
-			{{ form.as_p }}
-			<button type="submit">Сохранить</button>
+			{{ settings_form.as_p }}
+			<button type="submit" name="save_settings" value="1">Сохранить</button>
 		</form>
 		<p class="hint">Лог-файлы push-процессов для ваших дестинаций, к которым не было публикаций дольше указанного срока, удаляются автоматически.</p>
 	</div>

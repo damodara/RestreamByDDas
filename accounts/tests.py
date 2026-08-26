@@ -286,7 +286,8 @@ class ProfileTests(TestCase):
     def test_can_update_log_retention(self):
         self.client.force_login(self.user)
         response = self.client.post(
-            reverse("accounts:profile"), {"log_retention_days": 14}
+            reverse("accounts:profile"),
+            {"log_retention_days": 14, "save_settings": "1"},
         )
         self.assertRedirects(response, reverse("accounts:profile"))
         self.user.refresh_from_db()
@@ -295,7 +296,8 @@ class ProfileTests(TestCase):
     def test_rejects_out_of_range_log_retention(self):
         self.client.force_login(self.user)
         response = self.client.post(
-            reverse("accounts:profile"), {"log_retention_days": 0}
+            reverse("accounts:profile"),
+            {"log_retention_days": 0, "save_settings": "1"},
         )
         self.user.refresh_from_db()
         self.assertEqual(response.status_code, 200)
@@ -308,7 +310,11 @@ class ProfileTests(TestCase):
         self.client.force_login(self.user)
         self.client.post(
             reverse("accounts:profile"),
-            {"log_retention_days": 5, "notify_on_push_error": "on"},
+            {
+                "log_retention_days": 5,
+                "notify_on_push_error": "on",
+                "save_settings": "1",
+            },
         )
         self.user.refresh_from_db()
         self.assertTrue(self.user.notify_on_push_error)
@@ -319,10 +325,46 @@ class ProfileTests(TestCase):
         self.client.force_login(self.user)
         self.client.post(
             reverse("accounts:profile"),
-            {"log_retention_days": 5},
+            {"log_retention_days": 5, "save_settings": "1"},
         )
         self.user.refresh_from_db()
         self.assertFalse(self.user.notify_on_push_error)
+
+    def test_can_update_username_and_email(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("accounts:profile"),
+            {
+                "username": "newlogin",
+                "email": "newemail@example.com",
+                "save_identity": "1",
+            },
+        )
+        self.assertRedirects(response, reverse("accounts:profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "newlogin")
+        self.assertEqual(self.user.email, "newemail@example.com")
+
+    def test_rejects_duplicate_email_on_identity_update(self):
+        User.objects.create_user(
+            username="otheruser",
+            email="taken@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("accounts:profile"),
+            {
+                "username": self.user.username,
+                "email": "taken@example.com",
+                "save_identity": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "profileowner@example.com")
 
 
 class PasswordChangeTests(TestCase):
