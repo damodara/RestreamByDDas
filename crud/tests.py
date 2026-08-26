@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
+from crud.destination_presets import DESTINATION_PRESETS
 from crud.destination_test import test_push as test_push_fn
 from crud.destination_test import test_push_many
 from crud.emails import send_push_error_email, send_stream_drop_email
@@ -1752,6 +1753,70 @@ class StreamEndBroadcastViewTests(TestCase):
         self.assertContains(response, "инфраструктура недоступна")
 
 
+class StreamEndBroadcastButtonVisibilityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="endbtnowner",
+            email="endbtnowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.user)
+
+    def get_detail(self):
+        return self.client.get(reverse("crud:stream_detail", args=[self.stream.id]))
+
+    def assertHasEndBroadcastButton(self, response, stream):
+        self.assertContains(
+            response, reverse("crud:stream_end_broadcast", args=[stream.id])
+        )
+
+    def assertNoEndBroadcastButton(self, response, stream):
+        self.assertNotContains(
+            response, reverse("crud:stream_end_broadcast", args=[stream.id])
+        )
+
+    def test_button_stays_visible_after_stream_drops_from_stat(self):
+        # The whole point of the button is to let the user mark an
+        # already-stopped broadcast as intentionally ended — gating it on
+        # the live /stat check (rather than Stream.expected_live) made it
+        # disappear at exactly the moment it was needed, the instant OBS
+        # disconnected and /stat stopped reporting live.
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Dropped stream", expected_live=True
+        )
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.get_detail()
+        self.assertHasEndBroadcastButton(response, self.stream)
+
+    def test_button_hidden_once_broadcast_end_is_recorded(self):
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Ended stream", expected_live=False
+        )
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.get_detail()
+        self.assertNoEndBroadcastButton(response, self.stream)
+
+    def test_button_visible_while_genuinely_live(self):
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Live stream", expected_live=True
+        )
+        with patch(
+            "crud.views.fetch_stream_stats",
+            return_value={
+                "live": True,
+                "bytes_in": 1000,
+                "bytes_out": 2000,
+                "bw_in": 100,
+                "bw_out": 200,
+                "uptime_seconds": 65,
+            },
+        ):
+            response = self.get_detail()
+        self.assertHasEndBroadcastButton(response, self.stream)
+
+
 class StreamRegenerateKeyViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -2350,6 +2415,12 @@ class DestinationPresetTests(TestCase):
         )
         self.assertContains(response, "destination-presets-data")
         self.assertContains(response, "YouTube")
+        self.assertContains(response, "Rutube")
+        self.assertContains(response, "VK Видео Live")
+
+    def test_all_presets_have_an_rtmp_link(self):
+        for preset in DESTINATION_PRESETS:
+            self.assertTrue(preset.get("rtmp_link"), preset["name"])
 
     def test_update_form_includes_presets(self):
         destination = Rtmp.objects.create(

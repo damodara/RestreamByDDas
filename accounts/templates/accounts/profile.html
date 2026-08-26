@@ -35,7 +35,10 @@
 		{% elif telegram_bot_username %}
 			<p>Подключите Telegram, чтобы получать уведомления об ошибке пуша мгновенно, а не только на email.</p>
 			<a class="button" href="https://t.me/{{ telegram_bot_username }}?start={{ telegram_link_token }}" target="_blank" rel="noopener noreferrer">Подключить Telegram</a>
-			<p class="hint">Откроется Telegram — нажмите «Start» в чате с ботом. Ссылка действительна 15 минут, истёкшую можно обновить, перезагрузив эту страницу.</p>
+			<p class="hint">Откроется Telegram — нажмите «Start» в чате с ботом.</p>
+			<p class="hint">Если чат с ботом уже был открыт раньше, ссылка просто откроет его без отправки команды — тогда отправьте боту вручную:</p>
+			{% include "crud/_copy_field.html" with value="/start "|add:telegram_link_token %}
+			<p class="hint">Ссылка и команда действительны 15 минут — истёкшие можно обновить, перезагрузив эту страницу.</p>
 		{% else %}
 			<p class="hint">Telegram-бот не настроен на сервере.</p>
 		{% endif %}

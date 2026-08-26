@@ -13,6 +13,13 @@ document.addEventListener("DOMContentLoaded", function () {
 		var nameField = document.getElementById("id_socialmedia_name");
 		var linkField = document.getElementById("id_socialmedia_rtmp_link");
 		if (nameField) nameField.value = preset.name;
-		if (linkField) linkField.value = preset.rtmp_link;
+		// Не у каждого пресета есть адрес (см. crud.destination_presets —
+		// Rutube/VK не публикуют фиксированный) — очищаем поле и даём
+		// пользователю вставить свой, а не оставляем адрес от предыдущего
+		// выбранного пресета.
+		if (linkField) {
+			linkField.value = preset.rtmp_link || "";
+			if (!preset.rtmp_link) linkField.focus();
+		}
 	});
 });

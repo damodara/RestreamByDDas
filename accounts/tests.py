@@ -429,6 +429,17 @@ class ProfileTelegramTests(TestCase):
         self.assertContains(response, "https://t.me/restream_bot?start=")
 
     @override_settings(TELEGRAM_BOT_USERNAME="restream_bot")
+    def test_shows_manual_start_command_fallback_when_not_linked(self):
+        # A t.me/<bot>?start=<token> link only auto-sends "/start <token>"
+        # the first time a user opens a chat with that bot — if they've
+        # already chatted with it before (e.g. from an earlier attempt),
+        # Telegram just opens the existing chat without sending anything,
+        # so the token never reaches poll_telegram_bot. This copyable
+        # fallback command is what lets them recover from that.
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertContains(response, 'data-copy="/start ')
+
+    @override_settings(TELEGRAM_BOT_USERNAME="restream_bot")
     def test_shows_connected_state_when_linked(self):
         self.user.telegram_chat_id = "555"
         self.user.save(update_fields=["telegram_chat_id"])
