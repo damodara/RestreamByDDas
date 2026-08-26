@@ -12,6 +12,7 @@
 			{{ identity_form.as_p }}
 			<button type="submit" name="save_identity" value="1">Сохранить</button>
 		</form>
+		<p class="hint">Логин меняется сразу. Смена email требует подтверждения по ссылке из письма, отправленного на новый адрес.</p>
 		<p><a href="{% url 'accounts:password_change' %}">Изменить пароль</a></p>
 	</div>
 

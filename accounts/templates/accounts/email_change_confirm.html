@@ -1,0 +1,13 @@
+{% extends "crud/base.html" %}
+
+{% block title %}Подтверждение email — RestreamByDDas{% endblock %}
+
+{% block content %}
+	<h1>Сменить email на {{ new_email }}?</h1>
+	<div class="card">
+		<form method="post">
+			{% csrf_token %}
+			<button type="submit">Подтвердить</button>
+		</form>
+	</div>
+{% endblock %}

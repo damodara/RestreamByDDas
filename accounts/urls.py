@@ -14,6 +14,11 @@ urlpatterns = [
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("decision/<str:action>/<str:token>/", views.admin_decision, name="decision"),
+    path(
+        "confirm-email/<str:token>/",
+        views.confirm_email_change,
+        name="confirm_email_change",
+    ),
     path("profile/", views.profile, name="profile"),
     path(
         "profile/password/",

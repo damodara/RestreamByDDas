@@ -1,0 +1,22 @@
+{% extends "crud/base.html" %}
+
+{% block title %}Результат — RestreamByDDas{% endblock %}
+
+{% block content %}
+	{% if invalid %}
+		<h1>Ссылка недействительна</h1>
+		<div class="card">
+			<p>Ссылка устарела или некорректна.</p>
+		</div>
+	{% elif conflict %}
+		<h1>Email уже занят</h1>
+		<div class="card">
+			<p>Этот email уже используется другим аккаунтом. Смена не применена.</p>
+		</div>
+	{% elif success %}
+		<h1>Email изменён</h1>
+		<div class="card">
+			<p>Новый адрес: {{ email }}.</p>
+		</div>
+	{% endif %}
+{% endblock %}

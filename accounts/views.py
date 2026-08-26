@@ -8,10 +8,14 @@ from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
 
-from accounts.emails import send_admin_registration_notice, send_user_decision_notice
+from accounts.emails import (
+    send_admin_registration_notice,
+    send_email_change_confirmation,
+    send_user_decision_notice,
+)
 from accounts.forms import AccountIdentityForm, AccountSettingsForm, RegistrationForm
 from accounts.models import User
-from accounts.tokens import read_decision_token
+from accounts.tokens import read_decision_token, read_email_change_token
 
 
 def client_ip(request):
@@ -176,10 +180,25 @@ def profile(request):
     # их на отдельные URL, либо валидировать и сохранять оба ModelForm разом
     # при каждом сабмите.
     if request.method == "POST" and "save_identity" in request.POST:
+        current_email = request.user.email
         identity_form = AccountIdentityForm(request.POST, instance=request.user)
         if identity_form.is_valid():
-            identity_form.save()
-            messages.success(request, "Данные аккаунта обновлены.")
+            new_email = identity_form.cleaned_data["email"]
+            # AccountIdentityForm.is_valid() already wrote new_email onto
+            # request.user in-memory (it's bound directly as the form's
+            # instance) — revert that so the new address only takes effect
+            # once its owner confirms it, not immediately on save().
+            request.user.email = current_email
+            request.user.save(update_fields=["username", "email"])
+            if new_email != current_email:
+                send_email_change_confirmation(request, request.user, new_email)
+                messages.success(
+                    request,
+                    f"На адрес {new_email} отправлено письмо для подтверждения. "
+                    "Email изменится после перехода по ссылке из письма.",
+                )
+            else:
+                messages.success(request, "Данные аккаунта обновлены.")
             return redirect("accounts:profile")
         settings_form = AccountSettingsForm(instance=request.user)
     elif request.method == "POST" and "save_settings" in request.POST:
@@ -196,6 +215,40 @@ def profile(request):
         request,
         "accounts/profile.html",
         {"identity_form": identity_form, "settings_form": settings_form},
+    )
+
+
+def confirm_email_change(request, token):
+    """Не требует входа: ссылка из письма — сама по себе достаточный
+    credential (как и accounts.admin_decision), а письмо с ней уходит на
+    НОВЫЙ адрес, так что владелец аккаунта на этом устройстве может быть
+    не залогинен вовсе. GET только показывает, что подтверждается, и
+    ничего не меняет — почтовые клиенты/антивирусы иногда сами открывают
+    ссылки из писем, и одношаговый GET-триггер применил бы смену без
+    участия человека."""
+    data = read_email_change_token(token)
+    user = User.objects.filter(pk=data.get("user_id")).first() if data else None
+    new_email = data.get("email") if data else None
+
+    if user is None or not new_email:
+        return render(request, "accounts/email_change_result.html", {"invalid": True})
+
+    if User.objects.filter(email=new_email).exclude(pk=user.pk).exists():
+        return render(request, "accounts/email_change_result.html", {"conflict": True})
+
+    if request.method == "POST":
+        user.email = new_email
+        user.save(update_fields=["email"])
+        return render(
+            request,
+            "accounts/email_change_result.html",
+            {"success": True, "email": new_email},
+        )
+
+    return render(
+        request,
+        "accounts/email_change_confirm.html",
+        {"user": user, "new_email": new_email},
     )
 
 

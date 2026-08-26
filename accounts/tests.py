@@ -7,7 +7,7 @@ from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 from accounts.models import User
-from accounts.tokens import make_decision_token
+from accounts.tokens import make_decision_token, make_email_change_token
 from accounts.views import (
     LOGIN_THROTTLE_LIMIT,
     PASSWORD_RESET_THROTTLE_LIMIT,
@@ -330,20 +330,35 @@ class ProfileTests(TestCase):
         self.user.refresh_from_db()
         self.assertFalse(self.user.notify_on_push_error)
 
-    def test_can_update_username_and_email(self):
+    def test_can_update_username_immediately(self):
         self.client.force_login(self.user)
         response = self.client.post(
             reverse("accounts:profile"),
             {
                 "username": "newlogin",
-                "email": "newemail@example.com",
+                "email": self.user.email,
                 "save_identity": "1",
             },
         )
         self.assertRedirects(response, reverse("accounts:profile"))
         self.user.refresh_from_db()
         self.assertEqual(self.user.username, "newlogin")
-        self.assertEqual(self.user.email, "newemail@example.com")
+
+    def test_email_change_is_not_applied_until_confirmed(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("accounts:profile"),
+            {
+                "username": self.user.username,
+                "email": "newemail@example.com",
+                "save_identity": "1",
+            },
+        )
+        self.assertRedirects(response, reverse("accounts:profile"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "profileowner@example.com")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["newemail@example.com"])
 
     def test_rejects_duplicate_email_on_identity_update(self):
         User.objects.create_user(
@@ -365,6 +380,73 @@ class ProfileTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, "profileowner@example.com")
+        self.assertEqual(len(mail.outbox), 0)
+
+
+class EmailChangeConfirmationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="emailowner",
+            email="old@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def request_change(self, new_email="new@example.com"):
+        self.client.force_login(self.user)
+        self.client.post(
+            reverse("accounts:profile"),
+            {
+                "username": self.user.username,
+                "email": new_email,
+                "save_identity": "1",
+            },
+        )
+        self.client.logout()
+        return make_email_change_token(self.user, new_email)
+
+    def test_get_shows_confirmation_page_without_applying(self):
+        token = self.request_change()
+        response = self.client.get(
+            reverse("accounts:confirm_email_change", args=[token])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "old@example.com")
+
+    def test_post_applies_the_new_email(self):
+        token = self.request_change()
+        response = self.client.post(
+            reverse("accounts:confirm_email_change", args=[token])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "new@example.com")
+
+    def test_rejects_invalid_token(self):
+        response = self.client.post(
+            reverse("accounts:confirm_email_change", args=["not-a-real-token"])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "old@example.com")
+
+    def test_rejects_when_email_taken_in_the_meantime(self):
+        token = self.request_change()
+        User.objects.create_user(
+            username="raceduser",
+            email="new@example.com",
+            password="racepass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        response = self.client.post(
+            reverse("accounts:confirm_email_change", args=[token])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "old@example.com")
 
 
 class PasswordChangeTests(TestCase):
