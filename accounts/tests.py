@@ -338,6 +338,33 @@ class ProfileTests(TestCase):
         self.user.refresh_from_db()
         self.assertFalse(self.user.notify_on_push_error)
 
+    def test_auto_end_broadcast_on_drop_defaults_to_false(self):
+        self.assertFalse(self.user.auto_end_broadcast_on_drop)
+
+    def test_can_opt_in_to_auto_end_broadcast_on_drop(self):
+        self.client.force_login(self.user)
+        self.client.post(
+            reverse("accounts:profile"),
+            {
+                "log_retention_days": 5,
+                "auto_end_broadcast_on_drop": "on",
+                "save_settings": "1",
+            },
+        )
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.auto_end_broadcast_on_drop)
+
+    def test_can_opt_out_of_auto_end_broadcast_on_drop(self):
+        self.user.auto_end_broadcast_on_drop = True
+        self.user.save(update_fields=["auto_end_broadcast_on_drop"])
+        self.client.force_login(self.user)
+        self.client.post(
+            reverse("accounts:profile"),
+            {"log_retention_days": 5, "save_settings": "1"},
+        )
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.auto_end_broadcast_on_drop)
+
     def test_can_update_username_immediately(self):
         self.client.force_login(self.user)
         response = self.client.post(

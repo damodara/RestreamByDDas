@@ -18,8 +18,8 @@ from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
 from crud.destination_test import test_push as test_push_fn
 from crud.destination_test import test_push_many
-from crud.emails import send_push_error_email
-from crud.telegram_alerts import send_push_error_telegram
+from crud.emails import send_push_error_email, send_stream_drop_email
+from crud.telegram_alerts import send_push_error_telegram, send_stream_drop_telegram
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
@@ -530,6 +530,21 @@ class RtmpHooksTests(TestCase):
             f"{url}?secret={HOOK_SECRET}", {"name": self.stream.stream_key}
         )
         self.assertEqual(response.status_code, 200)
+
+    def test_on_publish_sets_expected_live(self):
+        url = reverse("crud:on_publish_hook")
+        self.assertFalse(self.stream.expected_live)
+        self.client.post(
+            f"{url}?secret={HOOK_SECRET}", {"name": self.stream.stream_key}
+        )
+        self.stream.refresh_from_db()
+        self.assertTrue(self.stream.expected_live)
+
+    def test_on_publish_does_not_set_expected_live_for_unknown_key(self):
+        url = reverse("crud:on_publish_hook")
+        self.client.post(f"{url}?secret={HOOK_SECRET}", {"name": "no-such-key"})
+        self.stream.refresh_from_db()
+        self.assertFalse(self.stream.expected_live)
 
     def test_destinations_hook_returns_push_urls(self):
         url = reverse("crud:stream_destinations_hook", args=[self.stream.stream_key])
@@ -1678,6 +1693,65 @@ class StreamRestartViewTests(TestCase):
         self.assertContains(response, "Не удалось перезапустить")
 
 
+class StreamEndBroadcastViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="endbroadcastowner",
+            email="endbroadcastowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="endbroadcastother",
+            email="endbroadcastother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(
+            owner=self.user, name="End broadcast stream", expected_live=True
+        )
+
+    def test_anonymous_redirects_to_login(self):
+        url = reverse("crud:stream_end_broadcast", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_end_broadcast", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+        self.stream.refresh_from_db()
+        self.assertTrue(self.stream.expected_live)
+
+    def test_get_not_allowed(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_end_broadcast", args=[self.stream.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_clears_expected_live_and_drops_publisher(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_end_broadcast", args=[self.stream.id])
+        with patch("crud.views.restart_stream", return_value=True) as mock_restart:
+            response = self.client.post(url, follow=True)
+        self.stream.refresh_from_db()
+        self.assertFalse(self.stream.expected_live)
+        mock_restart.assert_called_once_with(self.stream.stream_key)
+        self.assertContains(response, "Эфир завершён")
+
+    def test_clears_expected_live_even_if_drop_fails(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_end_broadcast", args=[self.stream.id])
+        with patch("crud.views.restart_stream", return_value=False):
+            response = self.client.post(url, follow=True)
+        self.stream.refresh_from_db()
+        self.assertFalse(self.stream.expected_live)
+        self.assertContains(response, "инфраструктура недоступна")
+
+
 class StreamRegenerateKeyViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -1802,6 +1876,196 @@ class PushErrorTelegramTests(TestCase):
         self.assertIn(
             f"http://example.com/crud/destinations/{self.destination.id}/log/", text
         )
+
+
+class StreamDropEmailTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="dropemailowner",
+            email="dropemailowner@example.com",
+            password="ownerpass123",
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Drop email stream")
+
+    @override_settings(SITE_URL="")
+    def test_sends_without_link_when_site_url_unset(self):
+        send_stream_drop_email(self.stream)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertNotIn("http", mail.outbox[0].body)
+
+    @override_settings(SITE_URL="http://example.com")
+    def test_includes_link_when_site_url_set(self):
+        send_stream_drop_email(self.stream)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(
+            f"http://example.com/crud/streams/{self.stream.id}/", mail.outbox[0].body
+        )
+
+    def test_skips_when_owner_has_no_email(self):
+        self.user.email = ""
+        self.user.save(update_fields=["email"])
+        send_stream_drop_email(self.stream)
+        self.assertEqual(len(mail.outbox), 0)
+
+
+class StreamDropTelegramTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="droptelegramowner",
+            email="droptelegramowner@example.com",
+            password="ownerpass123",
+            telegram_chat_id="13579",
+        )
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Drop telegram stream"
+        )
+
+    def test_skips_when_owner_has_no_chat_id(self):
+        self.user.telegram_chat_id = ""
+        self.user.save(update_fields=["telegram_chat_id"])
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            send_stream_drop_telegram(self.stream)
+        mock_send.assert_not_called()
+
+    @override_settings(SITE_URL="http://example.com")
+    def test_includes_link_when_site_url_set(self):
+        with patch("crud.telegram_alerts.send_message") as mock_send:
+            send_stream_drop_telegram(self.stream)
+        chat_id, text = mock_send.call_args.args
+        self.assertEqual(chat_id, "13579")
+        self.assertIn(f"http://example.com/crud/streams/{self.stream.id}/", text)
+
+
+class PollStreamHealthCommandTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="healthowner",
+            email="healthowner@example.com",
+            password="ownerpass123",
+        )
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Health stream", expected_live=True
+        )
+
+    def make_command(self):
+        from crud.management.commands.poll_stream_health import Command
+
+        return Command()
+
+    def test_skips_entirely_when_stat_unavailable(self):
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                return_value=None,
+            ),
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_email"
+            ) as mock_email,
+        ):
+            self.make_command()._tick()
+        mock_email.assert_not_called()
+        self.stream.refresh_from_db()
+        self.assertTrue(self.stream.expected_live)
+
+    def test_ignores_stream_that_is_still_live(self):
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                return_value={self.stream.stream_key},
+            ),
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_email"
+            ) as mock_email,
+        ):
+            self.make_command()._tick()
+        mock_email.assert_not_called()
+        self.stream.refresh_from_db()
+        self.assertTrue(self.stream.expected_live)
+
+    def test_ignores_stream_not_marked_expected_live(self):
+        self.stream.expected_live = False
+        self.stream.save(update_fields=["expected_live"])
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                return_value=set(),
+            ),
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_email"
+            ) as mock_email,
+        ):
+            self.make_command()._tick()
+        mock_email.assert_not_called()
+
+    def test_notifies_and_clears_flag_on_unexpected_drop(self):
+        self.user.notify_on_push_error = True
+        self.user.telegram_chat_id = "24680"
+        self.user.notify_telegram_on_push_error = True
+        self.user.save(
+            update_fields=[
+                "notify_on_push_error",
+                "telegram_chat_id",
+                "notify_telegram_on_push_error",
+            ]
+        )
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                return_value=set(),
+            ),
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_email"
+            ) as mock_email,
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_telegram"
+            ) as mock_telegram,
+        ):
+            self.make_command()._tick()
+        mock_email.assert_called_once_with(self.stream)
+        mock_telegram.assert_called_once_with(self.stream)
+        self.stream.refresh_from_db()
+        self.assertFalse(self.stream.expected_live)
+
+    def test_does_not_renotify_on_second_tick(self):
+        self.user.notify_on_push_error = True
+        self.user.save(update_fields=["notify_on_push_error"])
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                return_value=set(),
+            ),
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_email"
+            ) as mock_email,
+        ):
+            command = self.make_command()
+            command._tick()
+            command._tick()
+        self.assertEqual(mock_email.call_count, 1)
+
+    def test_clears_flag_without_notifying_when_auto_end_enabled(self):
+        self.user.notify_on_push_error = True
+        self.user.auto_end_broadcast_on_drop = True
+        self.user.save(
+            update_fields=["notify_on_push_error", "auto_end_broadcast_on_drop"]
+        )
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                return_value=set(),
+            ),
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_email"
+            ) as mock_email,
+            patch(
+                "crud.management.commands.poll_stream_health.send_stream_drop_telegram"
+            ) as mock_telegram,
+        ):
+            self.make_command()._tick()
+        mock_email.assert_not_called()
+        mock_telegram.assert_not_called()
+        self.stream.refresh_from_db()
+        self.assertFalse(self.stream.expected_live)
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)

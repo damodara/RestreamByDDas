@@ -59,4 +59,14 @@ python manage.py cleanup_destination_logs || true
     done
 ) &
 
+# Тот же принцип — сверяет Stream.expected_live с nginx-rtmp /stat раз в
+# 30с и уведомляет о необъявленном обрыве публикации (см.
+# crud.management.commands.poll_stream_health).
+(
+    while true; do
+        python manage.py poll_stream_health || true
+        sleep 5
+    done
+) &
+
 exec python manage.py runserver 0.0.0.0:8000

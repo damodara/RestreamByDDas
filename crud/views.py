@@ -232,6 +232,27 @@ def stream_restart(request, stream_id):
 
 @login_required
 @require_POST
+def stream_end_broadcast(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    # Сбрасываем флаг ДО вызова restart_stream() — даже если nginx-control
+    # окажется недоступен и дропнуть паблишера не получится, poll_stream_health
+    # не должен принять последующее штатное завершение потока за необъявленный
+    # обрыв только потому, что сам дроп не сработал.
+    stream.expected_live = False
+    stream.save(update_fields=["expected_live"])
+    if restart_stream(stream.stream_key):
+        messages.success(request, "Эфир завершён.")
+    else:
+        messages.error(
+            request,
+            "Эфир помечен завершённым, но отключить паблишера не удалось — "
+            "инфраструктура недоступна.",
+        )
+    return redirect("crud:stream_detail", stream_id=stream.pk)
+
+
+@login_required
+@require_POST
 def stream_regenerate_key(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     old_key = stream.stream_key
@@ -396,7 +417,13 @@ def on_publish_hook(request):
     if not _hook_authorized(request):
         return HttpResponseForbidden()
     stream_key = request.POST.get("name", "")
-    if Stream.objects.filter(stream_key=stream_key).exists():
+    # .update() doubles as the existence check and the expected_live=True
+    # flip in one query — a fresh SRT-sourced publish also lands here (see
+    # srt-bridge/start.sh: it republishes into nginx as an ordinary RTMP
+    # publish once the SRT leg is up), so this one hook covers both
+    # ingest protocols without srt_auth_hook needing its own copy of this.
+    updated = Stream.objects.filter(stream_key=stream_key).update(expected_live=True)
+    if updated:
         return HttpResponse(status=200)
     return HttpResponseForbidden()
 

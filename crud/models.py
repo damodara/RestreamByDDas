@@ -56,6 +56,16 @@ class Stream(models.Model):
     youtube_chat_video_id = models.CharField(
         max_length=200, blank=True, verbose_name="YouTube Video ID для чата"
     )
+    # True с момента успешной публикации (crud.views.on_publish_hook) до
+    # явного «Завершить эфир» (crud:stream_end_broadcast) — намерение
+    # "пользователь ещё не объявил, что закончил", а не текущий факт из
+    # nginx-rtmp /stat (который отвечает только на "идёт ли поток прямо
+    # сейчас", ничего не помня про предыдущие сеансы). Нужно отдельно от
+    # /stat, чтобы crud.management.commands.poll_stream_health мог отличить
+    # штатное завершение (кнопка нажата, флаг уже False) от необъявленного
+    # обрыва (флаг всё ещё True, а по /stat потока уже нет) — иначе оба
+    # случая выглядят для сервера одинаково.
+    expected_live = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name

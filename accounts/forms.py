@@ -28,4 +28,8 @@ class AccountIdentityForm(forms.ModelForm):
 class AccountSettingsForm(forms.ModelForm):
     class Meta:
         model = User
-        fields = ["log_retention_days", "notify_on_push_error"]
+        fields = [
+            "log_retention_days",
+            "notify_on_push_error",
+            "auto_end_broadcast_on_drop",
+        ]
