@@ -13,7 +13,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from crud.destination_logs import MAX_LINES, read_destination_log
 from crud.destination_presets import DESTINATION_PRESETS
-from crud.destination_test import test_push
+from crud.destination_test import test_push, test_push_many
 from crud.emails import send_push_error_email
 from crud.forms import DestinationForm, StreamChatForm, StreamForm
 from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
@@ -268,6 +268,24 @@ def stream_delete(request, stream_id):
         "crud/confirm_delete.html",
         {"object": stream, "object_label": stream.name},
     )
+
+
+@login_required
+@require_POST
+def stream_test_push_all(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    destinations = list(stream.destinations.filter(enabled=True))
+    if not destinations:
+        messages.info(request, "Нет включённых дестинаций для проверки.")
+        return redirect("crud:stream_detail", stream_id=stream.pk)
+    results = test_push_many({d.id: d.push_url for d in destinations})
+    for destination in destinations:
+        success, detail = results[destination.id]
+        if success:
+            messages.success(request, f"«{destination.socialmedia_name}»: {detail}")
+        else:
+            messages.error(request, f"«{destination.socialmedia_name}»: {detail}")
+    return redirect("crud:stream_detail", stream_id=stream.pk)
 
 
 @login_required

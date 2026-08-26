@@ -1,5 +1,6 @@
 import logging
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +65,23 @@ def test_push(push_url):
         (line for line in reversed(result.stderr.splitlines()) if line.strip()), ""
     )
     return False, error_line or "Площадка отклонила подключение."
+
+
+def test_push_many(push_urls_by_id):
+    """push_urls_by_id: {destination_id: push_url}. Возвращает
+    {destination_id: (success, detail)} — запускает test_push для всех
+    дестинаций ПАРАЛЛЕЛЬНО потоками, а не по очереди: subprocess.run
+    отпускает GIL на время ожидания ffmpeg, так что общее время проверки
+    ограничено TEST_PUSH_TIMEOUT_SECONDS одной проверки, а не их суммой по
+    всем дестинациям потока."""
+    if not push_urls_by_id:
+        return {}
+    with ThreadPoolExecutor(max_workers=len(push_urls_by_id)) as executor:
+        futures = {
+            destination_id: executor.submit(test_push, push_url)
+            for destination_id, push_url in push_urls_by_id.items()
+        }
+        return {
+            destination_id: future.result()
+            for destination_id, future in futures.items()
+        }

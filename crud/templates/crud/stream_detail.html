@@ -111,8 +111,14 @@
 	<h2>Куда рестримим</h2>
 	<div class="actions-row">
 		<a class="button" href="{% url 'crud:destination_create' stream.id %}">+ Добавить destination</a>
+		{% if stream.destinations.all %}
+			<form method="post" action="{% url 'crud:stream_test_push_all' stream.id %}">
+				{% csrf_token %}
+				<button type="submit" class="button secondary">Проверить все</button>
+			</form>
+		{% endif %}
 	</div>
-	<p class="hint">Кнопка «тест» у дестинации шлёт короткий тестовый ролик напрямую на площадку (без вашего реального эфира), чтобы проверить RTMP-адрес и ключ — занимает несколько секунд.</p>
+	<p class="hint">Кнопка «тест» шлёт короткий тестовый ролик напрямую на площадку (без вашего реального эфира), чтобы проверить RTMP-адрес и ключ — занимает несколько секунд. «Проверить все» делает то же самое сразу для всех включённых дестинаций.</p>
 
 	{% if stream.destinations.all %}
 		<ul class="destination-list">

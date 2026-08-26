@@ -17,6 +17,7 @@ from django.utils import timezone
 from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
 from crud.destination_test import test_push as test_push_fn
+from crud.destination_test import test_push_many
 from crud.emails import send_push_error_email
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
@@ -2104,3 +2105,120 @@ class DestinationTestPushFunctionTests(TestCase):
             success, detail = test_push_fn("rtmp://example.com/live/key")
         self.assertFalse(success)
         self.assertEqual(detail, "Connection refused")
+
+    def test_push_many_returns_empty_dict_for_no_destinations(self):
+        self.assertEqual(test_push_many({}), {})
+
+    def test_push_many_returns_result_per_destination(self):
+        def fake_test_push(push_url):
+            return (push_url == "rtmp://ok.example.com/live/key", push_url)
+
+        with patch("crud.destination_test.test_push", side_effect=fake_test_push):
+            results = test_push_many(
+                {
+                    1: "rtmp://ok.example.com/live/key",
+                    2: "rtmp://bad.example.com/live/key",
+                }
+            )
+        self.assertEqual(
+            results,
+            {
+                1: (True, "rtmp://ok.example.com/live/key"),
+                2: (False, "rtmp://bad.example.com/live/key"),
+            },
+        )
+
+
+class StreamTestPushAllViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="testallowner",
+            email="testallowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="testallother",
+            email="testallother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Test all stream")
+        self.ok_destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="OK dest",
+            socialmedia_rtmp_link="rtmp://ok.example.com/live",
+            socialmedia_rtmp_key="ok-key",
+        )
+        self.bad_destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="Bad dest",
+            socialmedia_rtmp_link="rtmp://bad.example.com/live",
+            socialmedia_rtmp_key="bad-key",
+        )
+        self.disabled_destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="Disabled dest",
+            socialmedia_rtmp_link="rtmp://disabled.example.com/live",
+            socialmedia_rtmp_key="disabled-key",
+            enabled=False,
+        )
+
+    def test_anonymous_redirects_to_login(self):
+        url = reverse("crud:stream_test_push_all", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_test_push_all", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_not_allowed(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_test_push_all", args=[self.stream.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_shows_message_per_enabled_destination_only(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_test_push_all", args=[self.stream.id])
+
+        def fake_test_push_many(push_urls_by_id):
+            return {
+                destination_id: (
+                    destination_id == self.ok_destination.id,
+                    "детали",
+                )
+                for destination_id in push_urls_by_id
+            }
+
+        with patch(
+            "crud.views.test_push_many", side_effect=fake_test_push_many
+        ) as mock_many:
+            response = self.client.post(url, follow=True)
+
+        mock_many.assert_called_once_with(
+            {
+                self.ok_destination.id: self.ok_destination.push_url,
+                self.bad_destination.id: self.bad_destination.push_url,
+            }
+        )
+        self.assertContains(response, "«OK dest»: детали")
+        self.assertContains(response, "«Bad dest»: детали")
+        self.assertNotContains(response, "«Disabled dest»: детали")
+
+    def test_shows_info_message_when_no_enabled_destinations(self):
+        self.ok_destination.enabled = False
+        self.ok_destination.save(update_fields=["enabled"])
+        self.bad_destination.enabled = False
+        self.bad_destination.save(update_fields=["enabled"])
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_test_push_all", args=[self.stream.id])
+        with patch("crud.views.test_push_many") as mock_many:
+            response = self.client.post(url, follow=True)
+        mock_many.assert_not_called()
+        self.assertContains(response, "Нет включённых дестинаций")

@@ -40,6 +40,11 @@ urlpatterns = [
         name="stream_regenerate_key",
     ),
     path(
+        "streams/<int:stream_id>/destinations/test-push/",
+        views.stream_test_push_all,
+        name="stream_test_push_all",
+    ),
+    path(
         "streams/<int:stream_id>/destinations/create/",
         views.destination_create,
         name="destination_create",
