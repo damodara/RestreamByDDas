@@ -15,7 +15,7 @@ from crud.destination_logs import MAX_LINES, read_destination_log
 from crud.forms import DestinationForm, StreamChatForm, StreamForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
-from crud.nginx_stat import fetch_stream_stats
+from crud.nginx_stat import fetch_live_stream_keys, fetch_stream_stats
 from crud.server_load import get_server_load
 
 
@@ -29,10 +29,38 @@ def _hook_authorized(request):
 @login_required
 def index(request):
     streams = Stream.objects.filter(owner=request.user)
+    live_keys = fetch_live_stream_keys()
     return render(
         request,
         "crud/index.html",
-        {"streams": streams, "server_load": get_server_load()},
+        {
+            "streams": streams,
+            "server_load": get_server_load(),
+            # None (не тот же случай, что "пустое множество" — /stat может
+            # быть просто недоступен, а не "все точки приёма офлайн") здесь
+            # уже не нужен шаблону: bool(None) == False, а .stream_key in
+            # set() тоже всегда False, так что "не в эфире" — безопасный
+            # дефолт и для "недоступно", и для "правда офлайн". Отдельный
+            # stats_available нужен только чтобы вообще решить, показывать
+            # бейдж или нет (см. index_live_json ниже — та же логика).
+            "live_keys": live_keys if live_keys is not None else set(),
+            "stats_available": live_keys is not None,
+        },
+    )
+
+
+@login_required
+@require_GET
+def index_live_json(request):
+    live_keys = fetch_live_stream_keys()
+    streams = Stream.objects.filter(owner=request.user).values("id", "stream_key")
+    if live_keys is None:
+        return JsonResponse({"available": False, "live": {}})
+    return JsonResponse(
+        {
+            "available": True,
+            "live": {str(s["id"]): s["stream_key"] in live_keys for s in streams},
+        }
     )
 
 
@@ -128,6 +156,7 @@ def stream_chat_json(request, stream_id):
             "id": message.id,
             "author_name": message.author_name,
             "text": message.text,
+            "posted_at": message.posted_at.isoformat(),
         }
         for message in messages_qs
     ]
@@ -260,6 +289,10 @@ def destination_toggle(request, destination_id):
     destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
     destination.enabled = not destination.enabled
     destination.save(update_fields=["enabled"])
+    if destination.enabled:
+        messages.success(request, f"«{destination.socialmedia_name}» включена.")
+    else:
+        messages.success(request, f"«{destination.socialmedia_name}» выключена.")
     return redirect("crud:stream_detail", stream_id=destination.stream_id)
 
 
@@ -272,6 +305,14 @@ def destination_log(request, destination_id):
         "crud/destination_log.html",
         {"destination": destination, "log_text": log_text, "max_lines": MAX_LINES},
     )
+
+
+@login_required
+@require_GET
+def destination_log_json(request, destination_id):
+    destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
+    log_text = read_destination_log(destination.stream.stream_key, destination.id)
+    return JsonResponse({"log_text": log_text})
 
 
 @csrf_exempt

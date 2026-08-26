@@ -17,7 +17,7 @@ from crud.destination_logs import read_destination_log
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
-from crud.nginx_stat import fetch_stream_stats
+from crud.nginx_stat import fetch_live_stream_keys, fetch_stream_stats
 from crud.server_load import get_server_load
 from crud.templatetags.ru_plural import ru_days
 from crud.youtube_chat import fetch_live_chat_id, fetch_new_messages
@@ -273,6 +273,16 @@ class CrudOwnershipTests(TestCase):
         response = self.client.get(toggle_url)
         self.assertEqual(response.status_code, 405)
 
+    def test_toggle_shows_feedback_message(self):
+        self.login(self.user)
+        toggle_url = reverse("crud:destination_toggle", args=[self.destination.id])
+
+        response = self.client.post(toggle_url, follow=True)
+        self.assertContains(response, "выключена")
+
+        response = self.client.post(toggle_url, follow=True)
+        self.assertContains(response, "включена")
+
     def test_other_user_cannot_toggle_destination(self):
         self.login(self.other_user)
         toggle_url = reverse("crud:destination_toggle", args=[self.destination.id])
@@ -339,6 +349,60 @@ class CrudOwnershipTests(TestCase):
         with patch("crud.views.restart_stream") as mock_restart:
             self.client.post(delete_url)
         mock_restart.assert_called_once_with(stream_key)
+
+
+class IndexLiveJsonViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="liveowner",
+            email="liveowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="liveother",
+            email="liveother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Моя точка")
+        self.other_stream = Stream.objects.create(
+            owner=self.other_user, name="Чужая точка"
+        )
+
+    def test_requires_login(self):
+        url = reverse("crud:index_live_json")
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_unavailable_when_stats_not_configured(self):
+        self.client.force_login(self.user)
+        with patch("crud.views.fetch_live_stream_keys", return_value=None):
+            response = self.client.get(reverse("crud:index_live_json"))
+        self.assertEqual(response.json(), {"available": False, "live": {}})
+
+    def test_scoped_to_own_streams_with_live_mapping(self):
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_live_stream_keys",
+            return_value={self.stream.stream_key, self.other_stream.stream_key},
+        ):
+            response = self.client.get(reverse("crud:index_live_json"))
+        self.assertEqual(
+            response.json(),
+            {"available": True, "live": {str(self.stream.id): True}},
+        )
+
+    def test_offline_when_key_not_in_live_set(self):
+        self.client.force_login(self.user)
+        with patch("crud.views.fetch_live_stream_keys", return_value=set()):
+            response = self.client.get(reverse("crud:index_live_json"))
+        self.assertEqual(
+            response.json(),
+            {"available": True, "live": {str(self.stream.id): False}},
+        )
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)
@@ -514,6 +578,30 @@ class NginxStatTests(TestCase):
             stats = fetch_stream_stats("known-key")
         self.assertNotIn("video_codec", stats)
         self.assertNotIn("audio_codec", stats)
+
+
+class FetchLiveStreamKeysTests(TestCase):
+    @override_settings(NGINX_STAT_URL="")
+    def test_returns_none_when_not_configured(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen") as mock_urlopen:
+            self.assertIsNone(fetch_live_stream_keys())
+            mock_urlopen.assert_not_called()
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_none_when_unreachable(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen", side_effect=OSError):
+            self.assertIsNone(fetch_live_stream_keys())
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_set_of_live_stream_keys(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            keys = fetch_live_stream_keys()
+        self.assertEqual(keys, {"known-key"})
 
 
 class YoutubeChatApiTests(TestCase):
@@ -844,6 +932,7 @@ class StreamChatViewTests(TestCase):
         data = response.json()
         self.assertEqual(len(data["messages"]), 1)
         self.assertEqual(data["messages"][0]["author_name"], "Зритель")
+        self.assertIn("posted_at", data["messages"][0])
         self.assertTrue(data["chat_enabled"])
 
     def test_chat_json_incremental_after_id(self):
@@ -1193,6 +1282,39 @@ class DestinationLogViewTests(TestCase):
             response,
             reverse("crud:destination_log", args=[self.destination.id]),
         )
+
+    def test_json_requires_login(self):
+        url = reverse("crud:destination_log_json", args=[self.destination.id])
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_json_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:destination_log_json", args=[self.destination.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_json_returns_log_text(self):
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.read_destination_log",
+            return_value="Input #0, flv, from 'rtmp://...'",
+        ):
+            response = self.client.get(
+                reverse("crud:destination_log_json", args=[self.destination.id])
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(), {"log_text": "Input #0, flv, from 'rtmp://...'"}
+        )
+
+    def test_json_returns_none_when_no_log_yet(self):
+        self.client.force_login(self.user)
+        with patch("crud.views.read_destination_log", return_value=None):
+            response = self.client.get(
+                reverse("crud:destination_log_json", args=[self.destination.id])
+            )
+        self.assertEqual(response.json(), {"log_text": None})
 
 
 class StreamStatsViewTests(TestCase):

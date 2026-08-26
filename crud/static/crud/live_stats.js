@@ -174,6 +174,15 @@
 		setInterval(tick, POLL_INTERVAL_MS);
 	}
 
+	function formatChatTime(iso) {
+		var date = new Date(iso);
+		if (isNaN(date.getTime())) return "";
+		// Локальное время браузера зрителя, не сервера — posted_at из API
+		// приходит в UTC (ISO 8601 с Z), сервер сам ничего не знает о
+		// часовом поясе конкретного пользователя, только Date() в браузере.
+		return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+	}
+
 	var CHAT_POLL_INTERVAL_MS = 3000;
 
 	function pollChat() {
@@ -218,8 +227,12 @@
 						if (container) {
 							var el = document.createElement("div");
 							el.className = "chat-message";
+							var time = document.createElement("span");
+							time.className = "chat-time";
+							time.textContent = formatChatTime(message.posted_at);
 							var author = document.createElement("strong");
 							author.textContent = message.author_name;
+							el.appendChild(time);
 							el.appendChild(author);
 							el.appendChild(document.createTextNode(message.text));
 							container.appendChild(el);
@@ -235,9 +248,77 @@
 		setInterval(tick, CHAT_POLL_INTERVAL_MS);
 	}
 
+	function pollIndexLive() {
+		var root = document.querySelector("[data-index-live-url]");
+		if (!root) return;
+		var url = root.dataset.indexLiveUrl;
+
+		function tick() {
+			fetch(url, { headers: { Accept: "application/json" } })
+				.then(function (r) {
+					return r.ok ? r.json() : null;
+				})
+				.then(function (data) {
+					if (!data || !data.available) return;
+					Object.keys(data.live).forEach(function (streamId) {
+						var slot = root.querySelector(
+							'[data-stream-live-badge="' + streamId + '"]'
+						);
+						if (!slot) return;
+						var live = data.live[streamId];
+						slot.innerHTML = live
+							? '<span class="badge live">в эфире</span>'
+							: '<span class="badge offline">не в эфире</span>';
+					});
+				})
+				.catch(function () {});
+		}
+
+		tick();
+		setInterval(tick, POLL_INTERVAL_MS);
+	}
+
+	function pollLog() {
+		var root = document.querySelector("[data-log-url]");
+		if (!root) return;
+		var url = root.dataset.logUrl;
+		var body = root.querySelector("[data-log-body]");
+
+		function tick() {
+			fetch(url, { headers: { Accept: "application/json" } })
+				.then(function (r) {
+					return r.ok ? r.json() : null;
+				})
+				.then(function (data) {
+					if (!data || !body) return;
+					if (data.log_text === null) {
+						body.innerHTML =
+							'<p class="empty-state">Лога пока нет — публикации с этой дестинацией ещё не было.</p>';
+					} else if (data.log_text) {
+						var pre = body.querySelector(".log-view");
+						if (!pre) {
+							body.innerHTML = "";
+							pre = document.createElement("pre");
+							pre.className = "log-view";
+							body.appendChild(pre);
+						}
+						pre.textContent = data.log_text;
+					} else {
+						body.innerHTML = '<p class="empty-state">Лог пуст.</p>';
+					}
+				})
+				.catch(function () {});
+		}
+
+		tick();
+		setInterval(tick, POLL_INTERVAL_MS);
+	}
+
 	document.addEventListener("DOMContentLoaded", function () {
 		pollServerLoad();
 		pollStreamStats();
 		pollChat();
+		pollIndexLive();
+		pollLog();
 	});
 })();

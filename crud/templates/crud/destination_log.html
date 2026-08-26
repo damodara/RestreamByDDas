@@ -6,14 +6,16 @@
 {% block content %}
 	<h1>Лог — {{ destination.socialmedia_name }}</h1>
 
-	<div class="card">
-		{% if log_text is None %}
-			<p class="empty-state">Лога пока нет — публикации с этой дестинацией ещё не было.</p>
-		{% elif log_text %}
-			<pre class="log-view">{{ log_text }}</pre>
-		{% else %}
-			<p class="empty-state">Лог пуст.</p>
-		{% endif %}
+	<div class="card" data-log-url="{% url 'crud:destination_log_json' destination.id %}">
+		<div data-log-body>
+			{% if log_text is None %}
+				<p class="empty-state">Лога пока нет — публикации с этой дестинацией ещё не было.</p>
+			{% elif log_text %}
+				<pre class="log-view">{{ log_text }}</pre>
+			{% else %}
+				<p class="empty-state">Лог пуст.</p>
+			{% endif %}
+		</div>
 		<p class="hint">Последние {{ max_lines }} строк ffmpeg-процесса, обслуживающего эту дестинацию. Перезаписывается заново при каждой новой публикации. Удаляется автоматически, если публикаций не было дольше {{ request.user.log_retention_days }} {{ request.user.log_retention_days|ru_days }} — изменить срок можно в <a href="{% url 'accounts:profile' %}">личном кабинете</a>.</p>
 	</div>
 

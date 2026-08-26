@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.index, name="index"),
     path("streams/create/", views.stream_create, name="stream_create"),
     path("server-load.json", views.server_load_json, name="server_load_json"),
+    path("index-live.json", views.index_live_json, name="index_live_json"),
     path("streams/<int:stream_id>/", views.stream_detail, name="stream_detail"),
     path(
         "streams/<int:stream_id>/stats.json",
@@ -57,6 +58,11 @@ urlpatterns = [
         "destinations/<int:destination_id>/log/",
         views.destination_log,
         name="destination_log",
+    ),
+    path(
+        "destinations/<int:destination_id>/log.json",
+        views.destination_log_json,
+        name="destination_log_json",
     ),
     path("rtmp-hooks/on-publish/", views.on_publish_hook, name="on_publish_hook"),
     path(

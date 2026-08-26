@@ -41,6 +41,33 @@ def fetch_stream_stats(stream_key):
     return {"live": False}
 
 
+def fetch_live_stream_keys():
+    """Множество stream_key всех сейчас live потоков — один запрос к /stat
+    вместо N (по одному на каждую точку приёма пользователя), которые
+    fetch_stream_stats(key) делал бы, если звать его в цикле по списку
+    стримов на index. Возвращает None, если /stat недоступен (тот же
+    fail-soft, что и у fetch_stream_stats)."""
+    if not settings.NGINX_STAT_URL:
+        return None
+
+    try:
+        with urllib.request.urlopen(settings.NGINX_STAT_URL, timeout=2) as response:
+            root = ET.fromstring(response.read())
+    except (urllib.error.URLError, OSError, ET.ParseError):
+        logger.warning(
+            "fetch_live_stream_keys: не удалось получить/разобрать %s",
+            settings.NGINX_STAT_URL,
+            exc_info=True,
+        )
+        return None
+
+    return {
+        stream.findtext("name")
+        for stream in root.findall("./server/application/live/stream")
+        if stream.findtext("name")
+    }
+
+
 def _parse_meta(meta):
     """Технические параметры входящего потока — nginx-rtmp узнаёт их из
     onMetaData/заголовков кодека самого потока, не от нас, так что блок

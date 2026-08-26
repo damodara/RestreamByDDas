@@ -158,6 +158,10 @@ h2 {
 }
 
 .stream-list li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
@@ -416,6 +420,12 @@ code {
 
 .chat-message strong {
 	color: var(--accent);
+	margin-right: 6px;
+}
+
+.chat-time {
+	color: var(--text-muted);
+	font-size: 0.76rem;
 	margin-right: 6px;
 }
 

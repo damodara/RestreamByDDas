@@ -12,10 +12,19 @@
 	</div>
 
 	{% if streams %}
-		<ul class="stream-list">
+		<ul class="stream-list" data-index-live-url="{% url 'crud:index_live_json' %}">
 			{% for stream in streams %}
 				<li>
 					<a href="{% url 'crud:stream_detail' stream.id %}">{{ stream.name }}</a>
+					<span data-stream-live-badge="{{ stream.id }}">
+						{% if stats_available %}
+							{% if stream.stream_key in live_keys %}
+								<span class="badge live">в эфире</span>
+							{% else %}
+								<span class="badge offline">не в эфире</span>
+							{% endif %}
+						{% endif %}
+					</span>
 				</li>
 			{% endfor %}
 		</ul>
