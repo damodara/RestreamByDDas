@@ -9,7 +9,7 @@ from django.urls import reverse_lazy
 from django.utils import timezone
 
 from accounts.emails import send_admin_registration_notice, send_user_decision_notice
-from accounts.forms import LogRetentionForm, RegistrationForm
+from accounts.forms import AccountSettingsForm, RegistrationForm
 from accounts.models import User
 from accounts.tokens import read_decision_token
 
@@ -172,13 +172,13 @@ def admin_decision(request, action, token):
 @login_required
 def profile(request):
     if request.method == "POST":
-        form = LogRetentionForm(request.POST, instance=request.user)
+        form = AccountSettingsForm(request.POST, instance=request.user)
         if form.is_valid():
             form.save()
             messages.success(request, "Настройки сохранены.")
             return redirect("accounts:profile")
     else:
-        form = LogRetentionForm(instance=request.user)
+        form = AccountSettingsForm(instance=request.user)
     return render(request, "accounts/profile.html", {"form": form})
 
 

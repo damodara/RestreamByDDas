@@ -12,8 +12,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from crud.destination_logs import MAX_LINES, read_destination_log
+from crud.emails import send_push_error_email
 from crud.forms import DestinationForm, StreamChatForm, StreamForm
-from crud.models import ChatMessage, Rtmp, Stream
+from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_live_stream_keys, fetch_stream_stats
 from crud.server_load import get_server_load
@@ -26,24 +27,43 @@ def _hook_authorized(request):
     )
 
 
+def _stream_live_status(stream, live_keys):
+    """Общая логика между index (первая загрузка) и index_live_json
+    (поллинг) — держим в одном месте по тому же принципу, что и
+    _stream_stats выше. push_error — та же staleness-логика, что и у
+    push_status в _stream_stats: считается только пока сам поток live,
+    иначе старая "ошибка" от прошлого сеанса висела бы бейджем на главной
+    даже после того, как проблемную дестинацию выключили или стрим давно
+    закончился."""
+    live = stream.stream_key in live_keys
+    push_error = live and any(
+        d.enabled and d.push_status == Rtmp.PushStatus.ERROR
+        for d in stream.destinations.all()
+    )
+    return {"live": live, "push_error": push_error}
+
+
 @login_required
 def index(request):
-    streams = Stream.objects.filter(owner=request.user)
+    streams = list(
+        Stream.objects.filter(owner=request.user).prefetch_related("destinations")
+    )
     live_keys = fetch_live_stream_keys()
+    # None (не тот же случай, что "пустое множество" — /stat может быть
+    # просто недоступен, а не "все точки приёма офлайн") здесь уже не нужен
+    # шаблону: bool(None) == False, а .stream_key in set() тоже всегда
+    # False, так что "не в эфире"/"без ошибок" — безопасный дефолт и для
+    # "недоступно", и для "правда офлайн". Отдельный stats_available нужен
+    # только чтобы вообще решить, показывать бейдж или нет (см.
+    # index_live_json ниже — та же логика).
+    for stream in streams:
+        stream.live_status = _stream_live_status(stream, live_keys or set())
     return render(
         request,
         "crud/index.html",
         {
             "streams": streams,
             "server_load": get_server_load(),
-            # None (не тот же случай, что "пустое множество" — /stat может
-            # быть просто недоступен, а не "все точки приёма офлайн") здесь
-            # уже не нужен шаблону: bool(None) == False, а .stream_key in
-            # set() тоже всегда False, так что "не в эфире" — безопасный
-            # дефолт и для "недоступно", и для "правда офлайн". Отдельный
-            # stats_available нужен только чтобы вообще решить, показывать
-            # бейдж или нет (см. index_live_json ниже — та же логика).
-            "live_keys": live_keys if live_keys is not None else set(),
             "stats_available": live_keys is not None,
         },
     )
@@ -53,13 +73,13 @@ def index(request):
 @require_GET
 def index_live_json(request):
     live_keys = fetch_live_stream_keys()
-    streams = Stream.objects.filter(owner=request.user).values("id", "stream_key")
+    streams = Stream.objects.filter(owner=request.user).prefetch_related("destinations")
     if live_keys is None:
-        return JsonResponse({"available": False, "live": {}})
+        return JsonResponse({"available": False, "streams": {}})
     return JsonResponse(
         {
             "available": True,
-            "live": {str(s["id"]): s["stream_key"] in live_keys for s in streams},
+            "streams": {str(s.id): _stream_live_status(s, live_keys) for s in streams},
         }
     )
 
@@ -208,6 +228,26 @@ def stream_restart(request, stream_id):
 
 
 @login_required
+@require_POST
+def stream_regenerate_key(request, stream_id):
+    stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
+    old_key = stream.stream_key
+    stream.stream_key = generate_stream_key()
+    stream.save(update_fields=["stream_key"])
+    # Сам ключ в БД мы уже сменили, но действующий паблишер (если он есть)
+    # nginx всё ещё держит под СТАРЫМ ключом — restart_stream(stream_key)
+    # дропает по имени потока, так что дропать нужно именно старый key,
+    # иначе живой стрим продолжит литься по уже недействительному ключу до
+    # тех пор, пока клиент сам не отключится (тот же принцип, что и у
+    # stream_delete ниже).
+    restart_stream(old_key)
+    messages.success(
+        request, "Ключ обновлён. Старый ключ больше не работает для публикации."
+    )
+    return redirect("crud:stream_detail", stream_id=stream.pk)
+
+
+@login_required
 def stream_delete(request, stream_id):
     stream = get_object_or_404(Stream, pk=stream_id, owner=request.user)
     if request.method == "POST":
@@ -352,14 +392,32 @@ def destination_status_hook(request):
     status = payload.get("status")
     if status not in Rtmp.PushStatus.values:
         return HttpResponseForbidden()
-    # .update(), не .save() — не хотим гонять destination через
-    # EncryptedCharField/clean() лишний раз ради обновления двух полей, и
-    # несуществующий destination_id (например, дестинацию удалили прямо
-    # во время публикации) должен быть тихим no-op, а не ошибкой: push.sh
-    # не в состоянии ничего сделать с ответом хука, это fire-and-forget.
-    Rtmp.objects.filter(pk=payload.get("destination_id")).update(
+    # Достаём объект (а не сразу .update()), чтобы поймать именно переход
+    # В ошибку, а не каждый повторный отчёт об уже известной ошибке —
+    # иначе при "зависшем" реконнекте пользователь получал бы письмо на
+    # каждый повторный статус-репорт push.sh вместо одного на инцидент.
+    # select_related на владельца — он же нужен для email-уведомления,
+    # незачем делать отдельный запрос.
+    destination = (
+        Rtmp.objects.select_related("stream__owner")
+        .filter(pk=payload.get("destination_id"))
+        .first()
+    )
+    if destination is None:
+        # Дестинацию удалили прямо во время публикации — тихий no-op, а не
+        # ошибка: push.sh не в состоянии ничего сделать с ответом хука,
+        # это fire-and-forget.
+        return HttpResponse(status=200)
+    was_error = destination.push_status == Rtmp.PushStatus.ERROR
+    Rtmp.objects.filter(pk=destination.pk).update(
         push_status=status, push_status_at=timezone.now()
     )
+    if (
+        status == Rtmp.PushStatus.ERROR
+        and not was_error
+        and destination.stream.owner.notify_on_push_error
+    ):
+        send_push_error_email(destination)
     return HttpResponse(status=200)
 
 

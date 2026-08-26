@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django import forms
+from django.core import mail
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -14,6 +15,7 @@ from django.utils import timezone
 
 from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
 from crud.destination_logs import read_destination_log
+from crud.emails import send_push_error_email
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
@@ -381,7 +383,7 @@ class IndexLiveJsonViewTests(TestCase):
         self.client.force_login(self.user)
         with patch("crud.views.fetch_live_stream_keys", return_value=None):
             response = self.client.get(reverse("crud:index_live_json"))
-        self.assertEqual(response.json(), {"available": False, "live": {}})
+        self.assertEqual(response.json(), {"available": False, "streams": {}})
 
     def test_scoped_to_own_streams_with_live_mapping(self):
         self.client.force_login(self.user)
@@ -392,7 +394,10 @@ class IndexLiveJsonViewTests(TestCase):
             response = self.client.get(reverse("crud:index_live_json"))
         self.assertEqual(
             response.json(),
-            {"available": True, "live": {str(self.stream.id): True}},
+            {
+                "available": True,
+                "streams": {str(self.stream.id): {"live": True, "push_error": False}},
+            },
         )
 
     def test_offline_when_key_not_in_live_set(self):
@@ -401,8 +406,82 @@ class IndexLiveJsonViewTests(TestCase):
             response = self.client.get(reverse("crud:index_live_json"))
         self.assertEqual(
             response.json(),
-            {"available": True, "live": {str(self.stream.id): False}},
+            {
+                "available": True,
+                "streams": {str(self.stream.id): {"live": False, "push_error": False}},
+            },
         )
+
+    def test_push_error_true_when_live_and_enabled_destination_erroring(self):
+        Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+            push_status=Rtmp.PushStatus.ERROR,
+        )
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_live_stream_keys",
+            return_value={self.stream.stream_key},
+        ):
+            response = self.client.get(reverse("crud:index_live_json"))
+        self.assertEqual(
+            response.json()["streams"][str(self.stream.id)],
+            {"live": True, "push_error": True},
+        )
+
+    def test_push_error_false_when_stream_not_live(self):
+        Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+            push_status=Rtmp.PushStatus.ERROR,
+        )
+        self.client.force_login(self.user)
+        with patch("crud.views.fetch_live_stream_keys", return_value=set()):
+            response = self.client.get(reverse("crud:index_live_json"))
+        self.assertEqual(
+            response.json()["streams"][str(self.stream.id)],
+            {"live": False, "push_error": False},
+        )
+
+    def test_push_error_false_when_erroring_destination_disabled(self):
+        Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+            push_status=Rtmp.PushStatus.ERROR,
+            enabled=False,
+        )
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_live_stream_keys",
+            return_value={self.stream.stream_key},
+        ):
+            response = self.client.get(reverse("crud:index_live_json"))
+        self.assertEqual(
+            response.json()["streams"][str(self.stream.id)],
+            {"live": True, "push_error": False},
+        )
+
+    def test_index_page_shows_push_error_badge(self):
+        Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+            push_status=Rtmp.PushStatus.ERROR,
+        )
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_live_stream_keys",
+            return_value={self.stream.stream_key},
+        ):
+            response = self.client.get(reverse("crud:index"))
+        self.assertContains(response, "ошибка пуша")
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)
@@ -504,6 +583,35 @@ class RtmpHooksTests(TestCase):
     def test_destination_status_hook_silently_ignores_unknown_destination(self):
         response = self.post_status(999999, "live")
         self.assertEqual(response.status_code, 200)
+
+    def test_status_hook_sends_email_on_error_when_opted_in(self):
+        self.user.notify_on_push_error = True
+        self.user.save(update_fields=["notify_on_push_error"])
+        response = self.post_status(self.destination.id, "error")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("VK", mail.outbox[0].subject)
+        self.assertEqual(mail.outbox[0].to, ["owner@example.com"])
+
+    def test_status_hook_does_not_email_when_not_opted_in(self):
+        response = self.post_status(self.destination.id, "error")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_status_hook_only_emails_on_edge_transition_to_error(self):
+        self.user.notify_on_push_error = True
+        self.user.save(update_fields=["notify_on_push_error"])
+        self.post_status(self.destination.id, "error")
+        self.post_status(self.destination.id, "error")
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_status_hook_emails_again_after_recovering_then_erroring(self):
+        self.user.notify_on_push_error = True
+        self.user.save(update_fields=["notify_on_push_error"])
+        self.post_status(self.destination.id, "error")
+        self.post_status(self.destination.id, "live")
+        self.post_status(self.destination.id, "error")
+        self.assertEqual(len(mail.outbox), 2)
 
 
 class NginxStatTests(TestCase):
@@ -1510,6 +1618,90 @@ class StreamRestartViewTests(TestCase):
         with patch("crud.views.restart_stream", return_value=False):
             response = self.client.post(url, follow=True)
         self.assertContains(response, "Не удалось перезапустить")
+
+
+class StreamRegenerateKeyViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="regenowner",
+            email="regenowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other_user = User.objects.create_user(
+            username="regenother",
+            email="regenother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Regen stream")
+
+    def test_anonymous_redirects_to_login(self):
+        url = reverse("crud:stream_regenerate_key", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_other_user_gets_404(self):
+        self.client.force_login(self.other_user)
+        url = reverse("crud:stream_regenerate_key", args=[self.stream.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_requires_post(self):
+        self.client.force_login(self.user)
+        url = reverse("crud:stream_regenerate_key", args=[self.stream.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_owner_can_regenerate_key(self):
+        self.client.force_login(self.user)
+        old_key = self.stream.stream_key
+        url = reverse("crud:stream_regenerate_key", args=[self.stream.id])
+        with patch("crud.views.restart_stream") as mock_restart:
+            response = self.client.post(url, follow=True)
+        self.stream.refresh_from_db()
+        self.assertNotEqual(self.stream.stream_key, old_key)
+        mock_restart.assert_called_once_with(old_key)
+        self.assertContains(response, "Ключ обновлён")
+
+
+class PushErrorEmailTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="emailowner",
+            email="emailowner@example.com",
+            password="ownerpass123",
+        )
+        self.stream = Stream.objects.create(owner=self.user, name="Email stream")
+        self.destination = Rtmp.objects.create(
+            stream=self.stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="vk-key",
+        )
+
+    @override_settings(SITE_URL="")
+    def test_sends_without_link_when_site_url_unset(self):
+        send_push_error_email(self.destination)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertNotIn("http", mail.outbox[0].body)
+
+    @override_settings(SITE_URL="http://example.com")
+    def test_includes_link_when_site_url_set(self):
+        send_push_error_email(self.destination)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(
+            f"http://example.com/crud/destinations/{self.destination.id}/log/",
+            mail.outbox[0].body,
+        )
+
+    def test_skips_when_owner_has_no_email(self):
+        self.user.email = ""
+        self.user.save(update_fields=["email"])
+        send_push_error_email(self.destination)
+        self.assertEqual(len(mail.outbox), 0)
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)

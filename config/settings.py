@@ -152,6 +152,16 @@ else:
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 
+# Публичный адрес сайта (например "http://64.188.99.163" или "https://
+# restream.example.com", без слэша на конце) — только для абсолютных ссылок
+# в письмах, отправляемых НЕ из обычного браузерного запроса, где Django
+# мог бы сам взять Host из request (как это делает встроенный
+# PasswordResetView). crud.views.destination_status_hook — как раз такой
+# случай: его дёргает push.sh изнутри docker-сети (http://django:8000), так
+# что request.build_absolute_uri() там дал бы неработающую внутреннюю
+# ссылку. Пусто = письмо просто не включает ссылку (crud.emails).
+SITE_URL = os.getenv("SITE_URL", "").rstrip("/")
+
 
 # RTMP
 # Публичный адрес сервера приёма RTMP-потоков — используется только для

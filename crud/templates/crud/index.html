@@ -18,10 +18,13 @@
 					<a href="{% url 'crud:stream_detail' stream.id %}">{{ stream.name }}</a>
 					<span data-stream-live-badge="{{ stream.id }}">
 						{% if stats_available %}
-							{% if stream.stream_key in live_keys %}
+							{% if stream.live_status.live %}
 								<span class="badge live">в эфире</span>
 							{% else %}
 								<span class="badge offline">не в эфире</span>
+							{% endif %}
+							{% if stream.live_status.push_error %}
+								<span class="badge error" title="У одной или нескольких дестинаций ошибка пуша">ошибка пуша</span>
 							{% endif %}
 						{% endif %}
 					</span>

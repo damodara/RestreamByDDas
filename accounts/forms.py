@@ -14,7 +14,7 @@ class RegistrationForm(UserCreationForm):
         self.fields["email"].required = True
 
 
-class LogRetentionForm(forms.ModelForm):
+class AccountSettingsForm(forms.ModelForm):
     class Meta:
         model = User
-        fields = ["log_retention_days"]
+        fields = ["log_retention_days", "notify_on_push_error"]

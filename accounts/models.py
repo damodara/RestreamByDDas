@@ -31,3 +31,14 @@ class User(AbstractUser):
         validators=[MinValueValidator(1), MaxValueValidator(90)],
         verbose_name="Хранить логи дестинаций (дней)",
     )
+    # Опт-ин, а не опт-аут — пользователь сам решает, нужны ли ему письма
+    # об ошибках пуша (crud.emails.send_push_error_email, отправляется из
+    # crud.views.destination_status_hook). По умолчанию выключено: без
+    # явного согласия рассылка при первом же сбое площадки была бы для
+    # пользователя неожиданной.
+    notify_on_push_error = models.BooleanField(
+        default=False,
+        verbose_name="Уведомлять на email при ошибке пуша",
+        help_text="Письмо придёт не чаще раза на инцидент — при переходе "
+        "дестинации в статус «Ошибка», а не на каждую повторную попытку.",
+    )

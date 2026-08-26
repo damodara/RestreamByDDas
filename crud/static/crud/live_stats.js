@@ -260,15 +260,20 @@
 				})
 				.then(function (data) {
 					if (!data || !data.available) return;
-					Object.keys(data.live).forEach(function (streamId) {
+					Object.keys(data.streams).forEach(function (streamId) {
 						var slot = root.querySelector(
 							'[data-stream-live-badge="' + streamId + '"]'
 						);
 						if (!slot) return;
-						var live = data.live[streamId];
-						slot.innerHTML = live
+						var status = data.streams[streamId];
+						var html = status.live
 							? '<span class="badge live">в эфире</span>'
 							: '<span class="badge offline">не в эфире</span>';
+						if (status.push_error) {
+							html +=
+								' <span class="badge error" title="У одной или нескольких дестинаций ошибка пуша">ошибка пуша</span>';
+						}
+						slot.innerHTML = html;
 					});
 				})
 				.catch(function () {});

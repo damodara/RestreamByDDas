@@ -301,6 +301,29 @@ class ProfileTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.user.log_retention_days, 5)
 
+    def test_notify_on_push_error_defaults_to_false(self):
+        self.assertFalse(self.user.notify_on_push_error)
+
+    def test_can_opt_in_to_push_error_notifications(self):
+        self.client.force_login(self.user)
+        self.client.post(
+            reverse("accounts:profile"),
+            {"log_retention_days": 5, "notify_on_push_error": "on"},
+        )
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.notify_on_push_error)
+
+    def test_can_opt_out_of_push_error_notifications(self):
+        self.user.notify_on_push_error = True
+        self.user.save(update_fields=["notify_on_push_error"])
+        self.client.force_login(self.user)
+        self.client.post(
+            reverse("accounts:profile"),
+            {"log_retention_days": 5},
+        )
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.notify_on_push_error)
+
 
 class PasswordChangeTests(TestCase):
     def setUp(self):

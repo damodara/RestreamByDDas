@@ -27,6 +27,10 @@
 			<div class="row">
 				<span class="proto">Ключ</span>
 				{% include "crud/_copy_field.html" with value=stream.stream_key %}
+				<form method="post" action="{% url 'crud:stream_regenerate_key' stream.id %}" onsubmit="return confirm('Старый ключ перестанет работать — все энкодеры, настроенные на него (OBS и т.п.), придётся перенастроить на новый. Продолжить?')">
+					{% csrf_token %}
+					<button type="submit" class="button secondary">Обновить ключ</button>
+				</form>
 			</div>
 		</div>
 	</div>
