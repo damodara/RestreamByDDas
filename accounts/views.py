@@ -7,7 +7,9 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, PasswordChangeView, PasswordResetView
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import get_object_or_404, redirect, render
+from django.db import transaction
+from django.http import Http404
+from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -158,18 +160,32 @@ def staff_required(view_func):
     return wrapper
 
 
-def _apply_admin_decision(user, approved):
+def _apply_admin_decision(user_id, action):
     """Общая часть между admin_decision (ссылка из письма) и
-    pending_user_decision (кнопка на странице заявок) — само изменение
-    статуса пользователя и письмо с результатом не должны отличаться в
-    зависимости от того, кто/как их вызвал."""
-    user.approval_status = (
-        User.ApprovalStatus.APPROVED if approved else User.ApprovalStatus.REJECTED
-    )
-    user.is_active = approved
-    user.approved_at = timezone.now()
-    user.save()
+    pending_user_decision (кнопка на странице заявок) — теперь единственное
+    место, которое реально меняет approval_status, чтобы гонка между двумя
+    входами (двойной клик, либо кто-то одновременно решает по письму и по
+    странице заявок) не привела к двойному письму/противоречивому решению.
+    select_for_update() внутри транзакции блокирует строку пользователя на
+    время проверки+записи, так что вторая параллельная попытка дожидается
+    первой и уже видит не-PENDING статус, а не обгоняет его.
+    Возвращает (user, applied): user is None, если такого пользователя нет;
+    applied=False, если он уже был не в PENDING (решение не применено)."""
+    approved = action == "approve"
+    with transaction.atomic():
+        user = User.objects.select_for_update().filter(pk=user_id).first()
+        if user is None:
+            return None, False
+        if user.approval_status != User.ApprovalStatus.PENDING:
+            return user, False
+        user.approval_status = (
+            User.ApprovalStatus.APPROVED if approved else User.ApprovalStatus.REJECTED
+        )
+        user.is_active = approved
+        user.approved_at = timezone.now()
+        user.save()
     send_user_decision_notice(user, approved)
+    return user, True
 
 
 @staff_required
@@ -185,18 +201,19 @@ def pending_users(request):
 def pending_user_decision(request, user_id, action):
     if action not in ("approve", "reject"):
         raise PermissionDenied
-    user = get_object_or_404(User, pk=user_id)
-    if user.approval_status != User.ApprovalStatus.PENDING:
+    user, applied = _apply_admin_decision(user_id, action)
+    if user is None:
+        raise Http404
+    if not applied:
         messages.error(
             request, f"Заявка пользователя «{user.username}» уже обработана."
         )
-        return redirect("accounts:pending_users")
-    _apply_admin_decision(user, approved=action == "approve")
-    messages.success(
-        request,
-        f"Пользователь «{user.username}» "
-        f"{'подтверждён' if action == 'approve' else 'отклонён'}.",
-    )
+    else:
+        messages.success(
+            request,
+            f"Пользователь «{user.username}» "
+            f"{'подтверждён' if action == 'approve' else 'отклонён'}.",
+        )
     return redirect("accounts:pending_users")
 
 
@@ -205,27 +222,36 @@ def admin_decision(request, action, token):
         return render(request, "accounts/decision_result.html", {"invalid": True})
 
     user_id = read_decision_token(token, action)
-    user = User.objects.filter(pk=user_id).first() if user_id else None
-
-    if user is None:
+    if user_id is None:
         return render(request, "accounts/decision_result.html", {"invalid": True})
 
+    if request.method == "POST":
+        user, applied = _apply_admin_decision(user_id, action)
+        if user is None:
+            return render(request, "accounts/decision_result.html", {"invalid": True})
+        if not applied:
+            return render(
+                request,
+                "accounts/decision_result.html",
+                {"already_processed": True, "user": user},
+            )
+        return render(
+            request,
+            "accounts/decision_result.html",
+            {"processed": True, "approved": action == "approve", "user": user},
+        )
+
+    # GET только показывает, что будет применено — не мутирует, поэтому
+    # обычное (без блокировки) чтение здесь безопасно.
+    user = User.objects.filter(pk=user_id).first()
+    if user is None:
+        return render(request, "accounts/decision_result.html", {"invalid": True})
     if user.approval_status != User.ApprovalStatus.PENDING:
         return render(
             request,
             "accounts/decision_result.html",
             {"already_processed": True, "user": user},
         )
-
-    if request.method == "POST":
-        approved = action == "approve"
-        _apply_admin_decision(user, approved)
-        return render(
-            request,
-            "accounts/decision_result.html",
-            {"processed": True, "approved": approved, "user": user},
-        )
-
     return render(
         request,
         "accounts/admin_decision_confirm.html",

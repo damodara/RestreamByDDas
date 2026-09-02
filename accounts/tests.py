@@ -202,8 +202,23 @@ class PendingUsersPageTests(TestCase):
             )
         )
         self.assertEqual(response.status_code, 403)
-        self.applicant.refresh_from_db()
-        self.assertEqual(self.applicant.approval_status, User.ApprovalStatus.PENDING)
+
+    def test_second_decision_on_same_user_is_a_no_op(self):
+        # Двойной клик / одновременно решение по письму и по этой странице
+        # не должны применяться дважды — второй вызов должен увидеть уже
+        # не-PENDING статус и не отправлять повторное письмо (см.
+        # _apply_admin_decision в accounts/views.py).
+        from accounts.views import _apply_admin_decision
+
+        user, applied = _apply_admin_decision(self.applicant.id, "approve")
+        self.assertTrue(applied)
+        self.assertEqual(len(mail.outbox), 1)
+
+        user, applied = _apply_admin_decision(self.applicant.id, "reject")
+        self.assertFalse(applied)
+        self.assertEqual(len(mail.outbox), 1)
+        user.refresh_from_db()
+        self.assertEqual(user.approval_status, User.ApprovalStatus.APPROVED)
 
 
 class LoginThrottleTests(TestCase):
