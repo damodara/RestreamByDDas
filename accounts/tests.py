@@ -95,6 +95,117 @@ class RegistrationApprovalFlowTests(TestCase):
         self.assertContains(response, "недействительна")
 
 
+class PendingUsersPageTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.admin = User.objects.create_user(
+            username="admin",
+            email="admin@example.com",
+            password="adminpass123",
+            is_staff=True,
+        )
+        self.applicant = User.objects.create_user(
+            username="newbie",
+            email="newbie@example.com",
+            password="some-strong-pass-1",
+            is_active=False,
+            approval_status=User.ApprovalStatus.PENDING,
+        )
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("accounts:pending_users"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("accounts:login"), response.url)
+
+    def test_non_staff_user_gets_forbidden(self):
+        User.objects.create_user(
+            username="plain",
+            email="plain@example.com",
+            password="plainpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.login(username="plain", password="plainpass123")
+        response = self.client.get(reverse("accounts:pending_users"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_lists_pending_users(self):
+        self.client.login(username="admin", password="adminpass123")
+        response = self.client.get(reverse("accounts:pending_users"))
+        self.assertContains(response, "newbie")
+        self.assertContains(response, "newbie@example.com")
+
+    def test_approve_activates_user_and_notifies_them(self):
+        self.client.login(username="admin", password="adminpass123")
+        response = self.client.post(
+            reverse(
+                "accounts:pending_user_decision", args=[self.applicant.id, "approve"]
+            ),
+            follow=True,
+        )
+        self.applicant.refresh_from_db()
+        self.assertTrue(self.applicant.is_active)
+        self.assertEqual(self.applicant.approval_status, User.ApprovalStatus.APPROVED)
+        self.assertContains(response, "подтверждён")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(self.applicant.email, mail.outbox[0].to)
+
+    def test_reject_keeps_user_inactive_and_notifies_them(self):
+        self.client.login(username="admin", password="adminpass123")
+        response = self.client.post(
+            reverse(
+                "accounts:pending_user_decision", args=[self.applicant.id, "reject"]
+            ),
+            follow=True,
+        )
+        self.applicant.refresh_from_db()
+        self.assertFalse(self.applicant.is_active)
+        self.assertEqual(self.applicant.approval_status, User.ApprovalStatus.REJECTED)
+        self.assertContains(response, "отклонён")
+
+    def test_already_processed_user_is_not_changed_again(self):
+        self.applicant.approval_status = User.ApprovalStatus.APPROVED
+        self.applicant.is_active = True
+        self.applicant.save()
+        self.client.login(username="admin", password="adminpass123")
+        response = self.client.post(
+            reverse(
+                "accounts:pending_user_decision", args=[self.applicant.id, "reject"]
+            ),
+            follow=True,
+        )
+        self.applicant.refresh_from_db()
+        self.assertEqual(self.applicant.approval_status, User.ApprovalStatus.APPROVED)
+        self.assertContains(response, "уже обработана")
+
+    def test_decision_requires_post(self):
+        self.client.login(username="admin", password="adminpass123")
+        response = self.client.get(
+            reverse(
+                "accounts:pending_user_decision", args=[self.applicant.id, "approve"]
+            )
+        )
+        self.assertEqual(response.status_code, 405)
+
+    def test_decision_requires_staff(self):
+        User.objects.create_user(
+            username="plain",
+            email="plain@example.com",
+            password="plainpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.client.login(username="plain", password="plainpass123")
+        response = self.client.post(
+            reverse(
+                "accounts:pending_user_decision", args=[self.applicant.id, "approve"]
+            )
+        )
+        self.assertEqual(response.status_code, 403)
+        self.applicant.refresh_from_db()
+        self.assertEqual(self.applicant.approval_status, User.ApprovalStatus.PENDING)
+
+
 class LoginThrottleTests(TestCase):
     def setUp(self):
         cache.clear()

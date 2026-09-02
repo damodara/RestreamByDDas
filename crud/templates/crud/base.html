@@ -13,6 +13,9 @@
 		<a class="brand" href="{% url 'crud:index' %}">RestreamByDDas</a>
 		{% if request.user.is_authenticated %}
 			<div class="user-info">
+				{% if request.user.is_staff %}
+					<a href="{% url 'accounts:pending_users' %}">Заявки</a>
+				{% endif %}
 				<a href="{% url 'accounts:profile' %}">{{ request.user.username }}</a>
 				<form method="post" action="{% url 'accounts:logout' %}">
 					{% csrf_token %}

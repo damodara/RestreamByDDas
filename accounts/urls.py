@@ -14,6 +14,12 @@ urlpatterns = [
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("decision/<str:action>/<str:token>/", views.admin_decision, name="decision"),
+    path("admin/users/", views.pending_users, name="pending_users"),
+    path(
+        "admin/users/<int:user_id>/<str:action>/",
+        views.pending_user_decision,
+        name="pending_user_decision",
+    ),
     path(
         "confirm-email/<str:token>/",
         views.confirm_email_change,

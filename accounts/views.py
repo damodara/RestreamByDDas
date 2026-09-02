@@ -1,11 +1,13 @@
 import ipaddress
+from functools import wraps
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, PasswordChangeView, PasswordResetView
 from django.core.cache import cache
-from django.shortcuts import redirect, render
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -141,6 +143,63 @@ class ThrottledPasswordResetView(PasswordResetView):
         return super().post(request, *args, **kwargs)
 
 
+def staff_required(view_func):
+    """login_required, но 403 (не редирект на логин) для залогиненного,
+    но не staff-пользователя — иначе он бы просто попадал обратно на форму
+    входа, где он уже вошёл, без объяснения, почему страница недоступна."""
+
+    @wraps(view_func)
+    @login_required
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_staff:
+            raise PermissionDenied
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+def _apply_admin_decision(user, approved):
+    """Общая часть между admin_decision (ссылка из письма) и
+    pending_user_decision (кнопка на странице заявок) — само изменение
+    статуса пользователя и письмо с результатом не должны отличаться в
+    зависимости от того, кто/как их вызвал."""
+    user.approval_status = (
+        User.ApprovalStatus.APPROVED if approved else User.ApprovalStatus.REJECTED
+    )
+    user.is_active = approved
+    user.approved_at = timezone.now()
+    user.save()
+    send_user_decision_notice(user, approved)
+
+
+@staff_required
+def pending_users(request):
+    pending = User.objects.filter(approval_status=User.ApprovalStatus.PENDING).order_by(
+        "date_joined"
+    )
+    return render(request, "accounts/pending_users.html", {"pending_users": pending})
+
+
+@staff_required
+@require_POST
+def pending_user_decision(request, user_id, action):
+    if action not in ("approve", "reject"):
+        raise PermissionDenied
+    user = get_object_or_404(User, pk=user_id)
+    if user.approval_status != User.ApprovalStatus.PENDING:
+        messages.error(
+            request, f"Заявка пользователя «{user.username}» уже обработана."
+        )
+        return redirect("accounts:pending_users")
+    _apply_admin_decision(user, approved=action == "approve")
+    messages.success(
+        request,
+        f"Пользователь «{user.username}» "
+        f"{'подтверждён' if action == 'approve' else 'отклонён'}.",
+    )
+    return redirect("accounts:pending_users")
+
+
 def admin_decision(request, action, token):
     if action not in ("approve", "reject"):
         return render(request, "accounts/decision_result.html", {"invalid": True})
@@ -160,13 +219,7 @@ def admin_decision(request, action, token):
 
     if request.method == "POST":
         approved = action == "approve"
-        user.approval_status = (
-            User.ApprovalStatus.APPROVED if approved else User.ApprovalStatus.REJECTED
-        )
-        user.is_active = approved
-        user.approved_at = timezone.now()
-        user.save()
-        send_user_decision_notice(user, approved)
+        _apply_admin_decision(user, approved)
         return render(
             request,
             "accounts/decision_result.html",

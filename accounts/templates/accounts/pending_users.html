@@ -1,0 +1,34 @@
+{% extends "crud/base.html" %}
+
+{% block title %}Заявки на регистрацию — RestreamByDDas{% endblock %}
+
+{% block content %}
+	<h1>Заявки на регистрацию</h1>
+	<div class="card">
+		{% if pending_users %}
+			<ul class="destination-list">
+				{% for pending_user in pending_users %}
+					<li>
+						<span class="name-group">
+							<span class="name">{{ pending_user.username }}</span>
+							<span>{{ pending_user.email }}</span>
+							<span class="hint">заявка от {{ pending_user.date_joined|date:"d.m.Y H:i" }}</span>
+						</span>
+						<span class="actions">
+							<form method="post" action="{% url 'accounts:pending_user_decision' pending_user.id 'approve' %}">
+								{% csrf_token %}
+								<button type="submit">Подтвердить</button>
+							</form>
+							<form method="post" action="{% url 'accounts:pending_user_decision' pending_user.id 'reject' %}" onsubmit="return confirm('Отклонить регистрацию «{{ pending_user.username }}»?')">
+								{% csrf_token %}
+								<button type="submit" class="danger">Отклонить</button>
+							</form>
+						</span>
+					</li>
+				{% endfor %}
+			</ul>
+		{% else %}
+			<p class="empty-state">Заявок на рассмотрении нет.</p>
+		{% endif %}
+	</div>
+{% endblock %}
