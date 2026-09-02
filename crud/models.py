@@ -1,3 +1,4 @@
+import re
 import secrets
 
 from django.conf import settings
@@ -11,26 +12,37 @@ def generate_stream_key():
     return secrets.token_urlsafe(16)
 
 
-# Опознаём площадку по подстроке в socialmedia_name (свободный текст,
-# пользователь вводит как хочет) — только для цветного бейджа-иконки в
-# stream_detail.html, ни на что функциональное не влияет. Официальные
-# логотипы (SVG) сознательно не используем — точное воспроизведение
-# чужих товарных знаков не стоит того ради декоративной иконки; вместо
-# этого — фирменный цвет площадки + инициалы, узнаваемо и без этого риска.
-# Короткие/двусмысленные подстроки (типа "ok") намеренно не включены —
-# слишком легко случайно совпадают с частью другого слова.
+# Опознаём площадку по подстроке/слову в socialmedia_name (свободный текст,
+# пользователь вводит как хочет, в любых вариантах: полное название,
+# распространённое сокращение, кириллица/латиница, с "ф"/"в" контакте и
+# т.д.) — только для цветного бейджа-иконки в stream_detail.html, ни на что
+# функциональное не влияет. Официальные логотипы (SVG) сознательно не
+# используем — точное воспроизведение чужих товарных знаков не стоит того
+# ради декоративной иконки; вместо этого — фирменный цвет площадки +
+# инициалы, узнаваемо и без этого риска.
+# Короткие/двусмысленные ключевые слова (типа "ok", "вк", "yt") сравниваются
+# только по целому слову (см. _tokenize ниже), а не как подстрока — иначе
+# они слишком легко случайно совпадают с частью другого слова. Более
+# длинные, однозначные ключевые слова по-прежнему матчатся как подстрока
+# всего названия, чтобы ловить склонения/окончания ("рутубе", "твича" и т.п.).
+_SHORT_KEYWORD_MAX_LEN = 3
 _PLATFORM_BADGES = [
-    (("вконтакте", "vkontakte", "vk.com", "vk"), "VK", "#0077FF"),
-    (("youtube", "ютуб"), "YT", "#FF0000"),
-    (("twitch",), "TW", "#9146FF"),
-    (("telegram", "телеграм", "телега"), "TG", "#26A5E4"),
-    (("одноклассники", "ok.ru", "okru"), "ОК", "#EE8208"),
+    (("вконтакте", "vkontakte", "vk.com", "vk", "вк"), "VK", "#0077FF"),
+    (("youtube", "ютуб", "ютюб", "yt"), "YT", "#FF0000"),
+    (("twitch", "твич"), "TW", "#9146FF"),
+    (("telegram", "телеграм", "телега", "тг", "tg"), "TG", "#26A5E4"),
+    (("facebook", "фейсбук", "fb"), "FB", "#1877F2"),
+    (("одноклассники", "ok.ru", "okru", "ок", "ok"), "ОК", "#EE8208"),
     (("rutube", "рутуб"), "RT", "#1D6FB8"),
     (("vimeo",), "VM", "#1AB7EA"),
     (("trovo",), "TR", "#19D66B"),
-    (("kick",), "K", "#53FC18"),
+    (("kick", "кик"), "K", "#53FC18"),
 ]
 _DEFAULT_BADGE_COLOR = "#6b7280"
+
+
+def _tokenize(name):
+    return set(re.split(r"[^a-zа-яё0-9]+", name))
 
 
 class Stream(models.Model):
@@ -158,9 +170,15 @@ class Rtmp(models.Model):
     @property
     def platform_badge(self):
         name = self.socialmedia_name.lower()
+        tokens = _tokenize(name)
         for keywords, label, color in _PLATFORM_BADGES:
-            if any(keyword in name for keyword in keywords):
-                return {"label": label, "color": color}
+            for keyword in keywords:
+                if len(keyword) <= _SHORT_KEYWORD_MAX_LEN:
+                    matched = keyword in tokens
+                else:
+                    matched = keyword in name
+                if matched:
+                    return {"label": label, "color": color}
         first_char = self.socialmedia_name.strip()[:1].upper() or "?"
         return {"label": first_char, "color": _DEFAULT_BADGE_COLOR}
 

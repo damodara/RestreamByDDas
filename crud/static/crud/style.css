@@ -725,3 +725,13 @@ button.danger:hover {
 	font-size: 0.85rem;
 	margin-top: 8px;
 }
+
+/* Django's ModelForm as_p renders a field's help_text as <span class="helptext">
+   right after the widget — style it like .hint so it reads the same as the
+   other explanatory notes on this form. */
+.helptext {
+	display: block;
+	color: var(--text-muted);
+	font-size: 0.85rem;
+	margin-top: 4px;
+}

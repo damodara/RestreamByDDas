@@ -1291,6 +1291,7 @@ class PlatformBadgeTests(TestCase):
             "YouTube Live": ("YT", "#FF0000"),
             "Мой Twitch": ("TW", "#9146FF"),
             "Telegram канал": ("TG", "#26A5E4"),
+            "Facebook": ("FB", "#1877F2"),
             "Одноклассники": ("ОК", "#EE8208"),
             "RuTube": ("RT", "#1D6FB8"),
             "Vimeo": ("VM", "#1AB7EA"),
@@ -1303,9 +1304,39 @@ class PlatformBadgeTests(TestCase):
                 destination.platform_badge, {"label": label, "color": color}
             )
 
+    def test_recognizes_alternate_spellings_and_abbreviations(self):
+        # Разные формулировки одной и той же площадки — кириллица/латиница,
+        # короткие обиходные сокращения, полное название — должны давать
+        # одну и ту же иконку.
+        cases = {
+            "ВК": ("VK", "#0077FF"),
+            "вк": ("VK", "#0077FF"),
+            "вконтакте": ("VK", "#0077FF"),
+            "Ютуб": ("YT", "#FF0000"),
+            "YT": ("YT", "#FF0000"),
+            "Твич": ("TW", "#9146FF"),
+            "Телега": ("TG", "#26A5E4"),
+            "ТГ": ("TG", "#26A5E4"),
+            "Фейсбук": ("FB", "#1877F2"),
+            "FB": ("FB", "#1877F2"),
+            "ОК": ("ОК", "#EE8208"),
+            "ok.ru": ("ОК", "#EE8208"),
+        }
+        for name, (label, color) in cases.items():
+            destination = self.make(name)
+            self.assertEqual(
+                destination.platform_badge, {"label": label, "color": color}
+            )
+
+    def test_short_keyword_does_not_match_inside_unrelated_word(self):
+        # "вк" — короткое ключевое слово для VK, но не должно подхватывать
+        # его как подстроку внутри не относящегося к делу слова.
+        destination = self.make("Локация вклад")
+        self.assertEqual(destination.platform_badge, {"label": "Л", "color": "#6b7280"})
+
     def test_unknown_platform_falls_back_to_initial(self):
-        destination = self.make("Facebook")
-        self.assertEqual(destination.platform_badge, {"label": "F", "color": "#6b7280"})
+        destination = self.make("Дзен")
+        self.assertEqual(destination.platform_badge, {"label": "Д", "color": "#6b7280"})
 
 
 def _age_file(path, days):

@@ -48,3 +48,13 @@ class DestinationForm(forms.ModelForm):
             "socialmedia_rtmp_link",
             "socialmedia_rtmp_key",
         ]
+        help_texts = {
+            # См. crud.models._PLATFORM_BADGES — иконка узнаёт площадку по
+            # названию в любом написании, а не только по точному названию
+            # из пресета.
+            "socialmedia_name": (
+                "По названию подбирается цветная иконка — подходит любое "
+                "написание: «VK», «ВК», «вк», «ВКонтакте», «YouTube», "
+                "«Ютуб» и т.д."
+            ),
+        }
