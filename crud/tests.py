@@ -1319,7 +1319,6 @@ class PlatformBadgeTests(TestCase):
             "ТГ": ("TG", "#26A5E4"),
             "Фейсбук": ("FB", "#1877F2"),
             "FB": ("FB", "#1877F2"),
-            "ОК": ("ОК", "#EE8208"),
             "ok.ru": ("ОК", "#EE8208"),
         }
         for name, (label, color) in cases.items():
@@ -1333,6 +1332,30 @@ class PlatformBadgeTests(TestCase):
         # его как подстроку внутри не относящегося к делу слова.
         destination = self.make("Локация вклад")
         self.assertEqual(destination.platform_badge, {"label": "Л", "color": "#6b7280"})
+
+    def test_bare_ok_is_not_treated_as_odnoklassniki(self):
+        # "ok"/"ок" — ходовое междометие, а не только сокращение
+        # Одноклассников, поэтому оно намеренно не входит в ключевые слова
+        # даже как целое слово (см. комментарий у _PLATFORM_BADGES).
+        for name, expected_initial in [
+            ("ОК", "О"),
+            ("test ok stream", "T"),
+            ("Стрим ок", "С"),
+        ]:
+            destination = self.make(name)
+            self.assertEqual(
+                destination.platform_badge,
+                {"label": expected_initial, "color": "#6b7280"},
+            )
+
+    def test_other_keyword_still_wins_alongside_bare_ok(self):
+        # Раньше "trovo ok" ловился бы как Одноклассники раньше, чем
+        # успевал совпасть настоящий "trovo" — с "ok" вне списка ключевых
+        # слов площадка определяется верно.
+        destination = self.make("trovo ok")
+        self.assertEqual(
+            destination.platform_badge, {"label": "TR", "color": "#19D66B"}
+        )
 
     def test_unknown_platform_falls_back_to_initial(self):
         destination = self.make("Дзен")
