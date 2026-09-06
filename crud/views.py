@@ -101,15 +101,25 @@ def stream_create(request):
     return render(request, "crud/stream_form.html", {"form": form})
 
 
+def _format_uptime(seconds):
+    """Человекочитаемая длительность эфира — часы/минуты вместо минут,
+    неограниченно растущих при долгом стриме (было видно, например, «595:54»)."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours} ч {minutes} мин"
+    if minutes:
+        return f"{minutes} мин {secs} с"
+    return f"{secs} с"
+
+
 def _stream_stats(stream):
     """Общая логика между stream_detail (HTML) и stream_stats_json — держим
     в одном месте, чтобы обновление на лету (JS-поллинг) не могло разойтись
     с тем, что рендерится при обычной загрузке страницы."""
     stats = fetch_stream_stats(stream.stream_key)
     if stats and stats.get("live"):
-        stats["uptime_display"] = (
-            f"{stats['uptime_seconds'] // 60}:{stats['uptime_seconds'] % 60:02d}"
-        )
+        stats["uptime_display"] = _format_uptime(stats["uptime_seconds"])
     live = bool(stats and stats.get("live"))
     destinations = [
         {

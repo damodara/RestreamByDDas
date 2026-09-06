@@ -1593,7 +1593,7 @@ class StreamStatsViewTests(TestCase):
                 reverse("crud:stream_detail", args=[self.stream.id])
             )
         self.assertContains(response, "В эфире")
-        self.assertContains(response, "1:05")
+        self.assertContains(response, "1 мин 5 с")
 
     def test_index_renders_server_load_panel(self):
         response = self.client.get(reverse("crud:index"))
@@ -2408,7 +2408,7 @@ class LiveStatsJsonViewTests(TestCase):
             )
         data = response.json()
         self.assertTrue(data["stats"]["live"])
-        self.assertEqual(data["stats"]["uptime_display"], "1:05")
+        self.assertEqual(data["stats"]["uptime_display"], "1 мин 5 с")
         self.assertEqual(
             data["destinations"], [{"id": self.destination.id, "push_status": "live"}]
         )
