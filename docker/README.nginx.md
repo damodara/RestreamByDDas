@@ -15,7 +15,7 @@ cp .env_example .env   # заполнить значения
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-Полная документация: [README.md](https://github.com/damodara/RestreamByDDas/blob/master/README.md) и [CLAUDE.md](https://github.com/damodara/RestreamByDDas/blob/master/CLAUDE.md) (архитектура).
+Полная документация: [README.md](https://github.com/damodara/RestreamByDDas/blob/master/README.md).
 
 ## Теги
 

@@ -220,7 +220,7 @@ APP_VERSION = os.getenv("APP_VERSION", "dev")
 
 
 # Security
-# Отдельный флаг от DEBUG намеренно: TLS в этом проекте (см. CLAUDE.md) пока
+# Отдельный флаг от DEBUG намеренно: TLS в этом проекте пока
 # не настроен даже для docker-compose — если завязать secure-cookies/HSTS
 # на одно только DEBUG=False, кто-то может выключить DEBUG раньше, чем
 # появится TLS, и тихо сломать себе логин (браузер не отправит cookie с
