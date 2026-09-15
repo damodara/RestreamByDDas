@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 
 from django.conf import settings
 from django.contrib import messages
@@ -21,6 +22,8 @@ from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_live_stream_keys, fetch_stream_stats
 from crud.server_load import get_server_load
+
+logger = logging.getLogger(__name__)
 
 
 def _hook_authorized(request):
@@ -425,6 +428,7 @@ def destination_log_json(request, destination_id):
 @require_POST
 def on_publish_hook(request):
     if not _hook_authorized(request):
+        logger.warning("on_publish_hook: запрос с неверным/отсутствующим secret")
         return HttpResponseForbidden()
     stream_key = request.POST.get("name", "")
     # .update() doubles as the existence check and the expected_live=True
@@ -435,15 +439,24 @@ def on_publish_hook(request):
     updated = Stream.objects.filter(stream_key=stream_key).update(expected_live=True)
     if updated:
         return HttpResponse(status=200)
+    logger.warning(
+        "on_publish_hook: неизвестный stream_key %r — паблиш отклонён", stream_key
+    )
     return HttpResponseForbidden()
 
 
 @require_GET
 def stream_destinations_hook(request, stream_key):
     if not _hook_authorized(request):
+        logger.warning(
+            "stream_destinations_hook: запрос с неверным/отсутствующим secret"
+        )
         return HttpResponseForbidden()
     stream = Stream.objects.filter(stream_key=stream_key).first()
     if stream is None:
+        logger.warning(
+            "stream_destinations_hook: неизвестный stream_key %r", stream_key
+        )
         return JsonResponse([], safe=False)
     destinations = [
         {"id": destination.id, "push_url": destination.push_url}
@@ -456,13 +469,20 @@ def stream_destinations_hook(request, stream_key):
 @require_POST
 def destination_status_hook(request):
     if not _hook_authorized(request):
+        logger.warning(
+            "destination_status_hook: запрос с неверным/отсутствующим secret"
+        )
         return HttpResponseForbidden()
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
+        logger.warning(
+            "destination_status_hook: невалидный JSON в теле запроса", exc_info=True
+        )
         return HttpResponseForbidden()
     status = payload.get("status")
     if status not in Rtmp.PushStatus.values:
+        logger.warning("destination_status_hook: неизвестный статус %r", status)
         return HttpResponseForbidden()
     # Достаём объект (а не сразу .update()), чтобы поймать именно переход
     # В ошибку, а не каждый повторный отчёт об уже известной ошибке —
@@ -499,14 +519,19 @@ def destination_status_hook(request):
 @require_POST
 def srt_auth_hook(request):
     if not _hook_authorized(request):
+        logger.warning("srt_auth_hook: запрос с неверным/отсутствующим secret")
         return HttpResponseForbidden()
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
+        logger.warning("srt_auth_hook: невалидный JSON в теле запроса", exc_info=True)
         return HttpResponseForbidden()
     if payload.get("action") != "publish":
         return HttpResponse(status=200)
     stream_key = payload.get("path", "")
     if Stream.objects.filter(stream_key=stream_key).exists():
         return HttpResponse(status=200)
+    logger.warning(
+        "srt_auth_hook: неизвестный stream_key %r — публикация отклонена", stream_key
+    )
     return HttpResponseForbidden()
