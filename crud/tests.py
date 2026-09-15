@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 from django import forms
 from django.core import mail
+from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -15,6 +17,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import DEFAULT_LOG_RETENTION_DAYS, User
+from crud.config_transfer import ConfigImportError, build_export, import_config
 from crud.destination_logs import read_destination_log
 from crud.destination_presets import DESTINATION_PRESETS
 from crud.destination_test import test_push as test_push_fn
@@ -28,6 +31,7 @@ from crud.nginx_stat import fetch_live_stream_keys, fetch_raw_stat, fetch_stream
 from crud.server_load import get_server_load
 from crud.server_logs import read_django_log, read_nginx_config_info, read_nginx_log
 from crud.templatetags.ru_plural import ru_days
+from crud.version_check import check_for_update, fetch_latest_release_tag
 from crud.youtube_chat import fetch_live_chat_id, fetch_new_messages
 
 HOOK_SECRET = "test-hook-secret"
@@ -809,6 +813,124 @@ class FetchRawStatTests(TestCase):
         ):
             raw = fetch_raw_stat()
         self.assertEqual(raw, STAT_XML.decode("utf-8"))
+
+
+class VersionCheckTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def _mock_tags_response(self, tag_names):
+        body = json.dumps([{"name": name} for name in tag_names]).encode("utf-8")
+        mock_response = MagicMock()
+        mock_response.read.return_value = body
+        mock_response.__enter__.return_value = mock_response
+        return mock_response
+
+    def test_fetch_latest_release_tag_returns_none_when_unreachable(self):
+        with patch("crud.version_check.urllib.request.urlopen", side_effect=OSError):
+            self.assertIsNone(fetch_latest_release_tag())
+
+    def test_fetch_latest_release_tag_picks_highest_semver(self):
+        mock_response = self._mock_tags_response(
+            ["v0.4.3", "v0.4.10", "v0.4.2", "not-a-version"]
+        )
+        with patch(
+            "crud.version_check.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertEqual(fetch_latest_release_tag(), "v0.4.10")
+
+    def test_fetch_latest_release_tag_caches_result(self):
+        mock_response = self._mock_tags_response(["v1.0.0"])
+        with patch(
+            "crud.version_check.urllib.request.urlopen", return_value=mock_response
+        ) as mock_urlopen:
+            self.assertEqual(fetch_latest_release_tag(), "v1.0.0")
+            self.assertEqual(fetch_latest_release_tag(), "v1.0.0")
+        mock_urlopen.assert_called_once()
+
+    def test_fetch_latest_release_tag_returns_none_when_no_semver_tags(self):
+        mock_response = self._mock_tags_response(["latest", "nightly"])
+        with patch(
+            "crud.version_check.urllib.request.urlopen", return_value=mock_response
+        ):
+            self.assertIsNone(fetch_latest_release_tag())
+
+    @override_settings(APP_VERSION="v0.4.2")
+    def test_check_for_update_flags_available_update(self):
+        with patch(
+            "crud.version_check.fetch_latest_release_tag", return_value="v0.4.3"
+        ):
+            result = check_for_update()
+        self.assertEqual(
+            result,
+            {"current": "v0.4.2", "latest": "v0.4.3", "update_available": True},
+        )
+
+    @override_settings(APP_VERSION="v0.4.3")
+    def test_check_for_update_reports_up_to_date(self):
+        with patch(
+            "crud.version_check.fetch_latest_release_tag", return_value="v0.4.3"
+        ):
+            result = check_for_update()
+        self.assertFalse(result["update_available"])
+
+    @override_settings(APP_VERSION="dev")
+    def test_check_for_update_returns_none_for_dev_build(self):
+        with patch(
+            "crud.version_check.fetch_latest_release_tag", return_value="v0.4.3"
+        ):
+            self.assertIsNone(check_for_update())
+
+    def test_check_for_update_returns_none_when_github_unreachable(self):
+        with patch("crud.version_check.fetch_latest_release_tag", return_value=None):
+            self.assertIsNone(check_for_update())
+
+
+class UpdateBannerTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.staff_user = User.objects.create_user(
+            username="updatestaff",
+            email="updatestaff@example.com",
+            password="staffpass123",
+            is_active=True,
+            is_staff=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.plain_user = User.objects.create_user(
+            username="updateplain",
+            email="updateplain@example.com",
+            password="plainpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    @override_settings(APP_VERSION="v0.4.2")
+    def test_staff_sees_update_banner(self):
+        self.client.force_login(self.staff_user)
+        with patch(
+            "crud.version_check.fetch_latest_release_tag", return_value="v0.4.3"
+        ):
+            response = self.client.get(reverse("crud:index"))
+        self.assertContains(response, "Доступна новая версия")
+        self.assertContains(response, "v0.4.3")
+
+    @override_settings(APP_VERSION="v0.4.3")
+    def test_no_banner_when_up_to_date(self):
+        self.client.force_login(self.staff_user)
+        with patch(
+            "crud.version_check.fetch_latest_release_tag", return_value="v0.4.3"
+        ):
+            response = self.client.get(reverse("crud:index"))
+        self.assertNotContains(response, "Доступна новая версия")
+
+    @override_settings(APP_VERSION="v0.4.2")
+    def test_non_staff_never_triggers_github_check(self):
+        self.client.force_login(self.plain_user)
+        with patch("crud.version_check.fetch_latest_release_tag") as mock_fetch:
+            response = self.client.get(reverse("crud:index"))
+        mock_fetch.assert_not_called()
+        self.assertNotContains(response, "Доступна новая версия")
 
 
 class YoutubeChatApiTests(TestCase):
@@ -2879,3 +3001,229 @@ class StreamTestPushAllViewTests(TestCase):
             response = self.client.post(url, follow=True)
         mock_many.assert_not_called()
         self.assertContains(response, "Нет включённых дестинаций")
+
+
+class BuildExportTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="exportowner",
+            email="exportowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.other = User.objects.create_user(
+            username="exportother",
+            email="exportother@example.com",
+            password="otherpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_includes_only_owners_streams_and_destinations(self):
+        stream = Stream.objects.create(owner=self.owner, name="Mine")
+        Rtmp.objects.create(
+            stream=stream,
+            socialmedia_name="VK",
+            socialmedia_rtmp_link="rtmp://vk.com/live",
+            socialmedia_rtmp_key="plain-secret-key",
+        )
+        Stream.objects.create(owner=self.other, name="Not mine")
+
+        payload = build_export(self.owner)
+
+        self.assertEqual(payload["format"], "restreambyddas-config-v1")
+        self.assertEqual(len(payload["streams"]), 1)
+        exported_stream = payload["streams"][0]
+        self.assertEqual(exported_stream["name"], "Mine")
+        self.assertEqual(exported_stream["stream_key"], stream.stream_key)
+        self.assertEqual(len(exported_stream["destinations"]), 1)
+        # Ключ отдаётся расшифрованным (открытым текстом) — не как хранится
+        # в БД (Fernet, недетерминированный шифротекст).
+        self.assertEqual(
+            exported_stream["destinations"][0]["socialmedia_rtmp_key"],
+            "plain-secret-key",
+        )
+
+    def test_empty_for_user_with_no_streams(self):
+        payload = build_export(self.owner)
+        self.assertEqual(payload["streams"], [])
+
+
+class ImportConfigTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="importowner",
+            email="importowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def make_payload(self, streams):
+        return {"format": "restreambyddas-config-v1", "streams": streams}
+
+    def test_rejects_unknown_format(self):
+        with self.assertRaises(ConfigImportError):
+            import_config(self.owner, {"format": "something-else", "streams": []})
+
+    def test_rejects_missing_streams_list(self):
+        with self.assertRaises(ConfigImportError):
+            import_config(self.owner, {"format": "restreambyddas-config-v1"})
+
+    def test_creates_streams_and_destinations(self):
+        payload = self.make_payload(
+            [
+                {
+                    "name": "Imported stream",
+                    "stream_key": "imported-key-123",
+                    "youtube_chat_video_id": "",
+                    "destinations": [
+                        {
+                            "socialmedia_name": "VK",
+                            "socialmedia_url": "",
+                            "socialmedia_rtmp_link": "rtmp://vk.com/live",
+                            "socialmedia_rtmp_key": "secret",
+                            "enabled": True,
+                        }
+                    ],
+                }
+            ]
+        )
+        result = import_config(self.owner, payload)
+        self.assertEqual(result["streams_created"], 1)
+        self.assertEqual(result["destinations_created"], 1)
+        self.assertEqual(result["regenerated_stream_names"], [])
+
+        stream = Stream.objects.get(owner=self.owner, name="Imported stream")
+        self.assertEqual(stream.stream_key, "imported-key-123")
+        destination = stream.destinations.get()
+        self.assertEqual(destination.socialmedia_rtmp_key, "secret")
+
+    def test_regenerates_stream_key_on_collision(self):
+        existing = Stream.objects.create(owner=self.owner, name="Existing")
+        payload = self.make_payload(
+            [{"name": "Colliding stream", "stream_key": existing.stream_key}]
+        )
+        result = import_config(self.owner, payload)
+        self.assertEqual(result["regenerated_stream_names"], ["Colliding stream"])
+        imported = Stream.objects.get(owner=self.owner, name="Colliding stream")
+        self.assertNotEqual(imported.stream_key, existing.stream_key)
+
+    def test_invalid_stream_rolls_back_whole_import(self):
+        payload = self.make_payload(
+            [
+                {"name": "Good stream"},
+                {"name": "x" * 200},  # длиннее max_length=100 — упадёт на full_clean
+            ]
+        )
+        with self.assertRaises(ConfigImportError):
+            import_config(self.owner, payload)
+        # Транзакция целиком откатилась — даже валидный первый поток не создался.
+        self.assertFalse(Stream.objects.filter(owner=self.owner).exists())
+
+    def test_invalid_destination_rolls_back_whole_import(self):
+        payload = self.make_payload(
+            [
+                {
+                    "name": "Stream with bad destination",
+                    "destinations": [
+                        {
+                            "socialmedia_name": "",  # обязательное поле, пусто недопустимо
+                            "socialmedia_rtmp_link": "rtmp://example.com/live",
+                            "socialmedia_rtmp_key": "key",
+                        }
+                    ],
+                }
+            ]
+        )
+        with self.assertRaises(ConfigImportError):
+            import_config(self.owner, payload)
+        self.assertFalse(Stream.objects.filter(owner=self.owner).exists())
+
+
+class ConfigExportViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="exportviewowner",
+            email="exportviewowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_requires_login(self):
+        url = reverse("crud:config_export")
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_returns_downloadable_json(self):
+        Stream.objects.create(owner=self.user, name="Export me")
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("crud:config_export"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment;", response["Content-Disposition"])
+        data = json.loads(response.content)
+        self.assertEqual(data["streams"][0]["name"], "Export me")
+
+
+class ConfigImportViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="importviewowner",
+            email="importviewowner@example.com",
+            password="ownerpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_requires_login(self):
+        url = reverse("crud:config_import")
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_get_shows_form(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("crud:config_import"))
+        self.assertContains(response, "Импорт настроек")
+
+    def test_valid_upload_creates_streams(self):
+        payload = {
+            "format": "restreambyddas-config-v1",
+            "streams": [{"name": "Uploaded stream", "destinations": []}],
+        }
+        upload = SimpleUploadedFile(
+            "backup.json",
+            json.dumps(payload).encode("utf-8"),
+            content_type="application/json",
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("crud:config_import"), {"config_file": upload}, follow=True
+        )
+        self.assertContains(response, "Импортировано точек приёма: 1")
+        self.assertTrue(
+            Stream.objects.filter(owner=self.user, name="Uploaded stream").exists()
+        )
+
+    def test_invalid_json_shows_error(self):
+        upload = SimpleUploadedFile(
+            "backup.json", b"not json at all", content_type="application/json"
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("crud:config_import"), {"config_file": upload}
+        )
+        self.assertContains(response, "не текстовый JSON")
+
+    def test_wrong_format_shows_error(self):
+        upload = SimpleUploadedFile(
+            "backup.json",
+            json.dumps({"format": "other", "streams": []}).encode("utf-8"),
+            content_type="application/json",
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("crud:config_import"), {"config_file": upload}
+        )
+        self.assertContains(response, "Неизвестный формат файла")

@@ -13,12 +13,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from accounts.views import staff_required
+from crud.config_transfer import ConfigImportError, build_export, import_config
 from crud.destination_logs import MAX_LINES, read_destination_log
 from crud.destination_presets import DESTINATION_PRESETS
 from crud.destination_test import test_push, test_push_many
 from crud.emails import send_push_error_email
 from crud.telegram_alerts import send_push_error_telegram
-from crud.forms import DestinationForm, StreamChatForm, StreamForm
+from crud.forms import ConfigImportForm, DestinationForm, StreamChatForm, StreamForm
 from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
 from crud.nginx_control import restart_stream
 from crud.nginx_stat import fetch_live_stream_keys, fetch_raw_stat, fetch_stream_stats
@@ -105,6 +106,54 @@ def stream_create(request):
     else:
         form = StreamForm()
     return render(request, "crud/stream_form.html", {"form": form})
+
+
+@login_required
+@require_GET
+def config_export(request):
+    payload = build_export(request.user)
+    response = JsonResponse(
+        payload, json_dumps_params={"ensure_ascii": False, "indent": 2}
+    )
+    filename = f"restreambyddas-backup-{timezone.now():%Y%m%d}.json"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+def config_import(request):
+    if request.method == "POST":
+        form = ConfigImportForm(request.POST, request.FILES)
+        if form.is_valid():
+            try:
+                raw = form.cleaned_data["config_file"].read().decode("utf-8")
+                payload = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                form.add_error(
+                    "config_file",
+                    "Не удалось разобрать файл — это не текстовый JSON.",
+                )
+            else:
+                try:
+                    result = import_config(request.user, payload)
+                except ConfigImportError as exc:
+                    form.add_error("config_file", str(exc))
+                else:
+                    summary = (
+                        f"Импортировано точек приёма: {result['streams_created']}, "
+                        f"дестинаций: {result['destinations_created']}."
+                    )
+                    if result["regenerated_stream_names"]:
+                        summary += (
+                            " Ключ публикации уже был занят и перегенерирован для: "
+                            + ", ".join(result["regenerated_stream_names"])
+                            + " — обновите адрес/ключ в энкодере для этих точек приёма."
+                        )
+                    messages.success(request, summary)
+                    return redirect("crud:index")
+    else:
+        form = ConfigImportForm()
+    return render(request, "crud/config_import.html", {"form": form})
 
 
 def _format_uptime(seconds):

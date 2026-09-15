@@ -9,7 +9,10 @@
 
 	<div class="actions-row">
 		<a class="button" href="{% url 'crud:stream_create' %}">+ Создать точку приёма</a>
+		<a class="button secondary" href="{% url 'crud:config_export' %}">Экспортировать настройки</a>
+		<a class="button secondary" href="{% url 'crud:config_import' %}">Импортировать настройки</a>
 	</div>
+	<p class="hint">Экспорт сохраняет точки приёма и дестинации (включая RTMP-ключи) в файл — резервная копия на случай проблем с сервером. Файл содержит настоящие credentials, храните его как пароль.</p>
 
 	{% if streams %}
 		<ul class="stream-list" data-index-live-url="{% url 'crud:index_live_json' %}">

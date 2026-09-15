@@ -58,3 +58,7 @@ class DestinationForm(forms.ModelForm):
                 "«Ютуб» и т.д."
             ),
         }
+
+
+class ConfigImportForm(forms.Form):
+    config_file = forms.FileField(label="Файл экспорта (JSON)")

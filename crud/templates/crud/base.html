@@ -27,6 +27,16 @@
 	</div>
 
 	<div class="container">
+		{% if update_info.update_available %}
+			{# update_info попадает в контекст только для is_staff — см. crud/context_processors.py #}
+			<ul class="messages">
+				<li>
+					Доступна новая версия: <strong>{{ update_info.latest }}</strong> (сейчас {{ update_info.current }}).
+					<a href="https://github.com/damodara/RestreamByDDas/releases/tag/{{ update_info.latest }}" target="_blank" rel="noopener">Что нового</a>
+					— обновляется вручную на сервере (<code>git pull</code>/<code>docker compose pull</code> + <code>up -d</code>), сайт сам себя не обновляет.
+				</li>
+			</ul>
+		{% endif %}
 		{% if messages %}
 			<ul class="messages">
 				{% for message in messages %}
