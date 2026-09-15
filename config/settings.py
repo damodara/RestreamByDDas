@@ -244,6 +244,24 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 # /control) молча проглатывались (except -> return None/False) — теперь они
 # хотя бы попадают в лог как WARNING, вместо того чтобы искать причину через
 # "почему статистика не грузится" без единой зацепки.
+#
+# Пишем не только в консоль, но и в файл — иначе увидеть этот лог можно
+# только через `docker compose logs django`, а не на самом сайте
+# (crud:server_logs, см. crud/server_logs.py). Дефолт BASE_DIR/"logs" уже
+# сам по себе корректен и для bare-metal (репозиторий), и для Docker
+# (BASE_DIR == /app, WORKDIR из Dockerfile) — переопределять в
+# docker-compose.yml не требуется, SERVER_LOG_DIR только для случая,
+# когда нужен путь на реальном примонтированном volume. Ротация
+# (5 МБ × 3 бэкапа) — чтобы лог не рос бесконечно без отдельной
+# management-команды вроде cleanup_destination_logs.
+# "or", не os.getenv(..., default) — в .env_example эта переменная (как и
+# остальные необязательные) документирована пустой строкой, а os.getenv
+# берёт default, только если ключа нет вообще, но не если он есть и пуст;
+# без "or" пустое значение улетело бы в os.makedirs("") и упало бы
+# FileNotFoundError вместо применения дефолтного пути.
+SERVER_LOG_DIR = os.getenv("SERVER_LOG_DIR") or str(BASE_DIR / "logs")
+os.makedirs(SERVER_LOG_DIR, exist_ok=True)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -251,9 +269,15 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
         },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(SERVER_LOG_DIR, "django.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 3,
+        },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": ["console", "file"],
         "level": "INFO",
     },
 }

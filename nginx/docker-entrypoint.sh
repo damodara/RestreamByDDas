@@ -17,4 +17,13 @@ envsubst '${DJANGO_HOOK_BASE_URL} ${RTMP_HOOK_SECRET}' \
 mkdir -p /tmp/rtmp-push
 chmod 1777 /tmp/rtmp-push
 
+# Диагностика для crud:server_logs (Django не может сам заглянуть внутрь
+# контейнера nginx) — только worker_processes, ни строчки больше: сама
+# nginx.conf содержит RTMP_HOOK_SECRET прямо в URL хуков (on_publish и
+# т.п.), выкладывать её целиком на общий том никак нельзя. Больше одного
+# воркера — самая частая причина "то в эфире, то нет" (/stat и /control
+# у nginx-rtmp не шарят состояние между воркерами, см. nginx.conf.template).
+mkdir -p /var/log/restream
+grep -E '^worker_processes' /etc/nginx/nginx.conf > /var/log/restream/nginx-config-info.txt || true
+
 exec nginx -g 'daemon off;'

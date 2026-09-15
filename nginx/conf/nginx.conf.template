@@ -6,6 +6,18 @@ user www-data;
 worker_processes 1;
 pid /run/nginx.pid;
 
+# Два error_log сразу (поддерживается с nginx 1.5.2) — в stderr для
+# "docker compose logs nginx", и вторым в файл на общем с Django volume
+# (server_logs, см. docker-compose.yml), чтобы этот же лог можно было
+# показать на сайте (crud:server_logs) без доступа к серверу. На этом
+# уровне (info, не notice) уже видны события начала/конца
+# RTMP-публикации — полезно при разборе "стрим остановлен, а /stat/сайт
+# всё ещё показывают live". Файл открывает master-процесс (root, ещё до
+# смены на www-data), поэтому пустая root:root-директория тома пишется
+# без отдельного chmod — не тот случай, что у exec_publish/push.sh ниже.
+error_log /dev/stderr info;
+error_log /var/log/restream/nginx-error.log info;
+
 # nginx по умолчанию обнуляет окружение воркеров — без этого push.sh/stop.sh
 # не увидят DJANGO_HOOK_BASE_URL/RTMP_HOOK_SECRET.
 env DJANGO_HOOK_BASE_URL;

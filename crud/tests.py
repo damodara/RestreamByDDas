@@ -24,8 +24,9 @@ from crud.telegram_alerts import send_push_error_telegram, send_stream_drop_tele
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
-from crud.nginx_stat import fetch_live_stream_keys, fetch_stream_stats
+from crud.nginx_stat import fetch_live_stream_keys, fetch_raw_stat, fetch_stream_stats
 from crud.server_load import get_server_load
+from crud.server_logs import read_django_log, read_nginx_config_info, read_nginx_log
 from crud.templatetags.ru_plural import ru_days
 from crud.youtube_chat import fetch_live_chat_id, fetch_new_messages
 
@@ -786,6 +787,30 @@ class FetchLiveStreamKeysTests(TestCase):
         self.assertEqual(keys, {"known-key"})
 
 
+class FetchRawStatTests(TestCase):
+    @override_settings(NGINX_STAT_URL="")
+    def test_returns_none_when_not_configured(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen") as mock_urlopen:
+            self.assertIsNone(fetch_raw_stat())
+            mock_urlopen.assert_not_called()
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_none_when_unreachable(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen", side_effect=OSError):
+            self.assertIsNone(fetch_raw_stat())
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_raw_xml_text(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            raw = fetch_raw_stat()
+        self.assertEqual(raw, STAT_XML.decode("utf-8"))
+
+
 class YoutubeChatApiTests(TestCase):
     @override_settings(YOUTUBE_API_KEY="")
     def test_fetch_live_chat_id_returns_none_without_key(self):
@@ -1245,6 +1270,126 @@ class ReadDestinationLogTests(TestCase):
             self.assertEqual(len(result_lines), 500)
             self.assertEqual(result_lines[0], "line100")
             self.assertEqual(result_lines[-1], "line599")
+
+
+class ReadServerLogTests(TestCase):
+    def test_nginx_log_returns_none_when_volume_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "crud.server_logs.NGINX_LOG_PATH", Path(tmp) / "no-such-file.log"
+            ):
+                self.assertIsNone(read_nginx_log())
+
+    def test_nginx_log_returns_file_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "nginx-error.log"
+            log_path.write_text("line1\nline2\n")
+            with patch("crud.server_logs.NGINX_LOG_PATH", log_path):
+                self.assertEqual(read_nginx_log(), "line1\nline2")
+
+    def test_django_log_returns_none_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with override_settings(SERVER_LOG_DIR=tmp):
+                self.assertIsNone(read_django_log())
+
+    def test_django_log_returns_file_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "django.log").write_text("started\nready\n")
+            with override_settings(SERVER_LOG_DIR=tmp):
+                self.assertEqual(read_django_log(), "started\nready")
+
+    def test_nginx_config_info_returns_none_when_volume_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "crud.server_logs.NGINX_CONFIG_INFO_PATH",
+                Path(tmp) / "no-such-file.txt",
+            ):
+                self.assertIsNone(read_nginx_config_info())
+
+    def test_nginx_config_info_returns_none_when_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            info_path = Path(tmp) / "nginx-config-info.txt"
+            info_path.write_text("")
+            with patch("crud.server_logs.NGINX_CONFIG_INFO_PATH", info_path):
+                self.assertIsNone(read_nginx_config_info())
+
+    def test_nginx_config_info_returns_file_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            info_path = Path(tmp) / "nginx-config-info.txt"
+            info_path.write_text("worker_processes 1;\n")
+            with patch("crud.server_logs.NGINX_CONFIG_INFO_PATH", info_path):
+                self.assertEqual(read_nginx_config_info(), "worker_processes 1;")
+
+
+class ServerLogsViewTests(TestCase):
+    def setUp(self):
+        self.staff_user = User.objects.create_user(
+            username="logstaff",
+            email="logstaff@example.com",
+            password="staffpass123",
+            is_active=True,
+            is_staff=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+        self.plain_user = User.objects.create_user(
+            username="logplain",
+            email="logplain@example.com",
+            password="plainpass123",
+            is_active=True,
+            approval_status=User.ApprovalStatus.APPROVED,
+        )
+
+    def test_requires_login(self):
+        url = reverse("crud:server_logs")
+        response = self.client.get(url)
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+
+    def test_non_staff_gets_403(self):
+        self.client.force_login(self.plain_user)
+        response = self.client.get(reverse("crud:server_logs"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_sees_log_contents(self):
+        self.client.force_login(self.staff_user)
+        with (
+            patch("crud.views.read_nginx_log", return_value="nginx line"),
+            patch("crud.views.read_django_log", return_value="django line"),
+        ):
+            response = self.client.get(reverse("crud:server_logs"))
+        self.assertContains(response, "nginx line")
+        self.assertContains(response, "django line")
+
+    def test_json_requires_staff(self):
+        self.client.force_login(self.plain_user)
+        response = self.client.get(reverse("crud:server_log_json", args=["django"]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_json_returns_log_text_for_known_source(self):
+        self.client.force_login(self.staff_user)
+        with patch("crud.views.read_nginx_log", return_value="nginx line"):
+            response = self.client.get(reverse("crud:server_log_json", args=["nginx"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"log_text": "nginx line"})
+
+    def test_json_rejects_unknown_source(self):
+        self.client.force_login(self.staff_user)
+        response = self.client.get(reverse("crud:server_log_json", args=["bogus"]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_json_returns_raw_stat(self):
+        self.client.force_login(self.staff_user)
+        with patch("crud.views.fetch_raw_stat", return_value="<rtmp>...</rtmp>"):
+            response = self.client.get(reverse("crud:server_log_json", args=["stat"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"log_text": "<rtmp>...</rtmp>"})
+
+    def test_html_shows_nginx_config_info(self):
+        self.client.force_login(self.staff_user)
+        with patch(
+            "crud.views.read_nginx_config_info", return_value="worker_processes 1;"
+        ):
+            response = self.client.get(reverse("crud:server_logs"))
+        self.assertContains(response, "worker_processes 1;")
 
 
 class RuDaysFilterTests(TestCase):
@@ -1855,6 +2000,30 @@ class StreamEndBroadcastButtonVisibilityTests(TestCase):
     def test_button_visible_while_genuinely_live(self):
         self.stream = Stream.objects.create(
             owner=self.user, name="Live stream", expected_live=True
+        )
+        with patch(
+            "crud.views.fetch_stream_stats",
+            return_value={
+                "live": True,
+                "bytes_in": 1000,
+                "bytes_out": 2000,
+                "bw_in": 100,
+                "bw_out": 200,
+                "uptime_seconds": 65,
+            },
+        ):
+            response = self.get_detail()
+        self.assertHasEndBroadcastButton(response, self.stream)
+
+    def test_button_visible_when_live_but_expected_live_desynced(self):
+        # Реальный баг: если expected_live почему-то False (например,
+        # poll_stream_health на несинхронном /stat из-за нескольких
+        # воркеров nginx ошибочно решил, что стрим уже отвалился), а поток
+        # по /stat всё ещё честно live — кнопка должна остаться доступной.
+        # Раньше была завязана только на expected_live и пропадала именно
+        # в этом случае, оставляя пользователя без способа остановить эфир.
+        self.stream = Stream.objects.create(
+            owner=self.user, name="Desynced stream", expected_live=False
         )
         with patch(
             "crud.views.fetch_stream_stats",

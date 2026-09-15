@@ -84,6 +84,12 @@ urlpatterns = [
         views.destination_log_json,
         name="destination_log_json",
     ),
+    path("server-logs/", views.server_logs, name="server_logs"),
+    path(
+        "server-logs/<str:log_name>.json",
+        views.server_log_json,
+        name="server_log_json",
+    ),
     path("rtmp-hooks/on-publish/", views.on_publish_hook, name="on_publish_hook"),
     path(
         "rtmp-hooks/destinations/<str:stream_key>/",

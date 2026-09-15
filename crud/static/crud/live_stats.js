@@ -284,39 +284,46 @@
 	}
 
 	function pollLog() {
-		var root = document.querySelector("[data-log-url]");
-		if (!root) return;
-		var url = root.dataset.logUrl;
-		var body = root.querySelector("[data-log-body]");
+		// querySelectorAll, не querySelector — на странице логов сервера
+		// (crud:server_logs) таких блоков сразу два (nginx и Django), и оба
+		// должны поллиться независимо, а не только первый найденный.
+		var roots = document.querySelectorAll("[data-log-url]");
+		if (!roots.length) return;
 
-		function tick() {
-			fetch(url, { headers: { Accept: "application/json" } })
-				.then(function (r) {
-					return r.ok ? r.json() : null;
-				})
-				.then(function (data) {
-					if (!data || !body) return;
-					if (data.log_text === null) {
-						body.innerHTML =
-							'<p class="empty-state">Лога пока нет — публикации с этой дестинацией ещё не было.</p>';
-					} else if (data.log_text) {
-						var pre = body.querySelector(".log-view");
-						if (!pre) {
-							body.innerHTML = "";
-							pre = document.createElement("pre");
-							pre.className = "log-view";
-							body.appendChild(pre);
+		roots.forEach(function (root) {
+			var url = root.dataset.logUrl;
+			var body = root.querySelector("[data-log-body]");
+			var missingText = root.dataset.logMissingText || "Лог недоступен.";
+
+			function tick() {
+				fetch(url, { headers: { Accept: "application/json" } })
+					.then(function (r) {
+						return r.ok ? r.json() : null;
+					})
+					.then(function (data) {
+						if (!data || !body) return;
+						if (data.log_text === null) {
+							body.innerHTML =
+								'<p class="empty-state">' + missingText + "</p>";
+						} else if (data.log_text) {
+							var pre = body.querySelector(".log-view");
+							if (!pre) {
+								body.innerHTML = "";
+								pre = document.createElement("pre");
+								pre.className = "log-view";
+								body.appendChild(pre);
+							}
+							pre.textContent = data.log_text;
+						} else {
+							body.innerHTML = '<p class="empty-state">Лог пуст.</p>';
 						}
-						pre.textContent = data.log_text;
-					} else {
-						body.innerHTML = '<p class="empty-state">Лог пуст.</p>';
-					}
-				})
-				.catch(function () {});
-		}
+					})
+					.catch(function () {});
+			}
 
-		tick();
-		setInterval(tick, POLL_INTERVAL_MS);
+			tick();
+			setInterval(tick, POLL_INTERVAL_MS);
+		});
 	}
 
 	document.addEventListener("DOMContentLoaded", function () {

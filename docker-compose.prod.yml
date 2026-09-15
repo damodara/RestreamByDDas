@@ -47,6 +47,9 @@ services:
       # но никогда не трогает *.pid (это книга учёта живых push-процессов,
       # ей распоряжается только push.sh/stop.sh в контейнере nginx).
       - rtmp_logs:/rtmp-logs
+      # error_log nginx (см. nginx/conf/nginx.conf.template) — read-only:
+      # Django только показывает его на crud:server_logs, никогда не пишет.
+      - server_logs:/server-logs:ro
     ports:
       # Только localhost — nginx ходит на django:8000 через внутреннюю
       # docker-сеть по имени сервиса, публикация на 0.0.0.0 тут не нужна
@@ -64,6 +67,10 @@ services:
     volumes:
       - static_files:/static:ro
       - rtmp_logs:/tmp/rtmp-push
+      # nginx.conf.template пишет свой error_log сюда вторым назначением
+      # (плюс дефолтный stderr) — общий volume с django, чтобы этот лог
+      # можно было показать на crud:server_logs.
+      - server_logs:/var/log/restream
     ports:
       - "80:80"
       - "1935:1935"
@@ -85,3 +92,4 @@ volumes:
   postgres_data:
   static_files:
   rtmp_logs:
+  server_logs:

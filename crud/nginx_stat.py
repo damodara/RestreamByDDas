@@ -68,6 +68,29 @@ def fetch_live_stream_keys():
     }
 
 
+def fetch_raw_stat():
+    """Сырой XML /stat как его отдал nginx-rtmp, без парсинга — для
+    crud:server_logs. Разобранные fetch_stream_stats/fetch_live_stream_keys
+    отвечают на вопрос "жив ли КОНКРЕТНЫЙ поток", а не показывают, что
+    nginx-rtmp думает целиком: этого достаточно, пока /stat врёт
+    консистентно, но если у nginx несколько worker_processes (у /stat
+    нет общего состояния между воркерами — см. nginx.conf.template),
+    расхождение видно только на сырых данных, не в одном булевом флаге."""
+    if not settings.NGINX_STAT_URL:
+        return None
+
+    try:
+        with urllib.request.urlopen(settings.NGINX_STAT_URL, timeout=2) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError):
+        logger.warning(
+            "fetch_raw_stat: не удалось получить %s",
+            settings.NGINX_STAT_URL,
+            exc_info=True,
+        )
+        return None
+
+
 def _parse_meta(meta):
     """Технические параметры входящего потока — nginx-rtmp узнаёт их из
     onMetaData/заголовков кодека самого потока, не от нас, так что блок

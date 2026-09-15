@@ -1,0 +1,60 @@
+{% extends "crud/base.html" %}
+
+{% block title %}Логи сервера — RestreamByDDas{% endblock %}
+
+{% block content %}
+	<h1>Логи сервера</h1>
+	<p class="hint">Технические логи всего сервера, а не одной дестинации (её собственный лог — на странице точки приёма). Последние {{ max_lines }} строк каждого, обновляется автоматически.</p>
+
+	<h2>Конфиг nginx</h2>
+	<div class="card">
+		{% if nginx_config_info is None %}
+			<p class="empty-state">Недоступно — общий volume с контейнером nginx не подключён (например, bare-metal dev без Docker).</p>
+		{% else %}
+			<pre class="log-view">{{ nginx_config_info }}</pre>
+		{% endif %}
+		<p class="hint">Больше одного воркера — самая частая причина, по которой «в эфире»/«Завершить эфир»/«Перезапустить трансляцию» ведут себя непоследовательно: у nginx-rtmp <code>/stat</code> и <code>/control</code> не шарят состояние между воркерами, каждый видит только те публикации, что обслужил сам. Правильно — <code>worker_processes 1;</code>.</p>
+	</div>
+
+	<h2>Сырой /stat</h2>
+	<div class="card" data-log-url="{% url 'crud:server_log_json' 'stat' %}" data-log-missing-text="/stat недоступен — NGINX_STAT_URL не задан или nginx не отвечает.">
+		<div data-log-body>
+			{% if raw_stat is None %}
+				<p class="empty-state">/stat недоступен — NGINX_STAT_URL не задан или nginx не отвечает.</p>
+			{% elif raw_stat %}
+				<pre class="log-view">{{ raw_stat }}</pre>
+			{% else %}
+				<p class="empty-state">Пусто.</p>
+			{% endif %}
+		</div>
+		<p class="hint">То, что nginx-rtmp реально отдаёт на <code>/stat</code>, без разбора Django'ом — если поток должен быть офлайн, а тут всё ещё висит его <code>&lt;stream&gt;</code>, дело не на стороне сайта.</p>
+	</div>
+
+	<h2>nginx (error_log)</h2>
+	<div class="card" data-log-url="{% url 'crud:server_log_json' 'nginx' %}" data-log-missing-text="Лог недоступен — общий volume с контейнером nginx не подключён (например, bare-metal dev без Docker).">
+		<div data-log-body>
+			{% if nginx_log is None %}
+				<p class="empty-state">Лог недоступен — общий volume с контейнером nginx не подключён (например, bare-metal dev без Docker).</p>
+			{% elif nginx_log %}
+				<pre class="log-view">{{ nginx_log }}</pre>
+			{% else %}
+				<p class="empty-state">Лог пуст.</p>
+			{% endif %}
+		</div>
+	</div>
+
+	<h2>Django</h2>
+	<div class="card" data-log-url="{% url 'crud:server_log_json' 'django' %}">
+		<div data-log-body>
+			{% if django_log is None %}
+				<p class="empty-state">Лог недоступен.</p>
+			{% elif django_log %}
+				<pre class="log-view">{{ django_log }}</pre>
+			{% else %}
+				<p class="empty-state">Лог пуст.</p>
+			{% endif %}
+		</div>
+	</div>
+
+	<p><a href="{% url 'crud:index' %}">← Назад к списку</a></p>
+{% endblock %}

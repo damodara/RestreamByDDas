@@ -15,6 +15,7 @@
 			<div class="user-info">
 				{% if request.user.is_staff %}
 					<a href="{% url 'accounts:pending_users' %}">Заявки</a>
+					<a href="{% url 'crud:server_logs' %}">Логи сервера</a>
 				{% endif %}
 				<a href="{% url 'accounts:profile' %}">{{ request.user.username }}</a>
 				<form method="post" action="{% url 'accounts:logout' %}">

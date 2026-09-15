@@ -6,12 +6,13 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from accounts.views import staff_required
 from crud.destination_logs import MAX_LINES, read_destination_log
 from crud.destination_presets import DESTINATION_PRESETS
 from crud.destination_test import test_push, test_push_many
@@ -20,8 +21,10 @@ from crud.telegram_alerts import send_push_error_telegram
 from crud.forms import DestinationForm, StreamChatForm, StreamForm
 from crud.models import ChatMessage, Rtmp, Stream, generate_stream_key
 from crud.nginx_control import restart_stream
-from crud.nginx_stat import fetch_live_stream_keys, fetch_stream_stats
+from crud.nginx_stat import fetch_live_stream_keys, fetch_raw_stat, fetch_stream_stats
 from crud.server_load import get_server_load
+from crud.server_logs import MAX_LINES as SERVER_LOG_MAX_LINES
+from crud.server_logs import read_django_log, read_nginx_config_info, read_nginx_log
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +424,47 @@ def destination_log(request, destination_id):
 def destination_log_json(request, destination_id):
     destination = get_object_or_404(Rtmp, pk=destination_id, stream__owner=request.user)
     log_text = read_destination_log(destination.stream.stream_key, destination.id)
+    return JsonResponse({"log_text": log_text})
+
+
+@staff_required
+def server_logs(request):
+    """Технические логи Django и nginx (не про конкретную дестинацию —
+    см. destination_log выше) — только для is_staff, а не login_required,
+    как остальной crud: это диагностика всего сервера, а не данные одного
+    владельца, и может случайно засветить чужой stream_key в тексте лога
+    (см. логирование отказов hook'ов в on_publish_hook и т.п.)."""
+    return render(
+        request,
+        "crud/server_logs.html",
+        {
+            "nginx_log": read_nginx_log(),
+            "django_log": read_django_log(),
+            "raw_stat": fetch_raw_stat(),
+            # Не поллится JS'ом (в отличие от логов ниже) — задаётся один
+            # раз при старте контейнера nginx и не меняется без рестарта,
+            # опрашивать его каждые 5с смысла не имеет.
+            "nginx_config_info": read_nginx_config_info(),
+            "max_lines": SERVER_LOG_MAX_LINES,
+        },
+    )
+
+
+@staff_required
+@require_GET
+def server_log_json(request, log_name):
+    # Не через словарь функций-читателей — словарь захватил бы ссылку на
+    # функцию на момент импорта модуля, и patch("crud.views.read_nginx_log",
+    # ...) в тестах на неё бы не подействовал (сам read_nginx_log()/
+    # read_django_log() ниже резолвится по имени при каждом вызове).
+    if log_name == "nginx":
+        log_text = read_nginx_log()
+    elif log_name == "django":
+        log_text = read_django_log()
+    elif log_name == "stat":
+        log_text = fetch_raw_stat()
+    else:
+        raise Http404
     return JsonResponse({"log_text": log_text})
 
 
