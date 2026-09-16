@@ -58,11 +58,11 @@
 					</div>
 					<div class="metric">
 						<div class="value">{{ stats.bytes_in|filesizeformat }}</div>
-						<div class="label">Принято ({{ stats.bw_in }} bit/s)</div>
+						<div class="label">Принято ({{ stats.bw_in_display }})</div>
 					</div>
 					<div class="metric">
 						<div class="value">{{ stats.bytes_out|filesizeformat }}</div>
-						<div class="label">Отдано ({{ stats.bw_out }} bit/s)</div>
+						<div class="label">Отдано ({{ stats.bw_out_display }})</div>
 					</div>
 				</div>
 					{% if stats.video_codec or stats.audio_codec %}
@@ -89,12 +89,10 @@
 				{% csrf_token %}
 				<button type="submit" class="button secondary">Перезапустить трансляцию</button>
 			</form>
-			{% if stats.live or stream.expected_live %}
-				<form method="post" action="{% url 'crud:stream_end_broadcast' stream.id %}" onsubmit="return confirm('Завершить эфир? Текущий паблишер будет отключён.')">
-					{% csrf_token %}
-					<button type="submit" class="button secondary">Завершить эфир</button>
-				</form>
-			{% endif %}
+			<form data-end-broadcast-form method="post" action="{% url 'crud:stream_end_broadcast' stream.id %}" onsubmit="return confirm('Завершить эфир? Текущий паблишер будет отключён.')" {% if not stats.live and not stream.expected_live %}hidden{% endif %}>
+				{% csrf_token %}
+				<button type="submit" class="button secondary">Завершить эфир</button>
+			</form>
 		</div>
 		<p class="hint">«Перезапустить трансляцию» сработает, только если стриминговый клиент (например OBS) сам переподключается после разрыва — так делает большинство энкодеров по умолчанию. Также нужно после добавления/изменения destination-ов, чтобы они подхватились. «Завершить эфир» отмечает трансляцию явно законченной — без этого обрыв связи или сбой энкодера считается необъявленным обрывом (уведомление об этом можно включить в личном кабинете → Настройки).</p>
 	</div>

@@ -81,6 +81,19 @@
 			badge.classList.toggle("offline", !live);
 		}
 
+		// Только показываем, никогда не прячем обратно — иначе сломался бы
+		// тот же grace window, ради которого эта кнопка вообще видна и
+		// после того, как live стало false (см. hint на странице и
+		// CLAUDE.md): изначальная видимость при загрузке страницы уже
+		// учитывает и live, и stream.expected_live через OR на сервере,
+		// а здесь достаточно снять hidden, если поток стал live уже после
+		// того, как страница отрисовалась (иначе кнопка не появлялась бы,
+		// пока не перезагрузить страницу — именно так и выглядел баг).
+		if (live) {
+			var endBroadcastForm = root.querySelector("[data-end-broadcast-form]");
+			if (endBroadcastForm) endBroadcastForm.hidden = false;
+		}
+
 		var body = root.querySelector("[data-stats-body]");
 		if (body) {
 			if (stats === null) {
@@ -96,13 +109,13 @@
 					'<div class="metric"><div class="value">' +
 					formatBytes(stats.bytes_in) +
 					'</div><div class="label">Принято (' +
-					stats.bw_in +
-					' bit/s)</div></div>' +
+					stats.bw_in_display +
+					')</div></div>' +
 					'<div class="metric"><div class="value">' +
 					formatBytes(stats.bytes_out) +
 					'</div><div class="label">Отдано (' +
-					stats.bw_out +
-					' bit/s)</div></div>' +
+					stats.bw_out_display +
+					')</div></div>' +
 					"</div>";
 
 				if (stats.video_codec || stats.audio_codec) {

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -1925,6 +1926,26 @@ class StreamStatsViewTests(TestCase):
             )
         self.assertContains(response, "В эфире")
         self.assertContains(response, "1 мин 5 с")
+        self.assertContains(response, "100 бит/с")
+        self.assertContains(response, "200 бит/с")
+
+    def test_stream_detail_shows_megabit_bitrate(self):
+        # Реальный кейс с сервера: длинное число вроде "2756736 bit/s"
+        # должно превращаться в человекочитаемое "2.8 Мбит/с".
+        stats = {
+            "live": True,
+            "bytes_in": 1000,
+            "bytes_out": 0,
+            "bw_in": 2756736,
+            "bw_out": 0,
+            "uptime_seconds": 34,
+        }
+        with patch("crud.views.fetch_stream_stats", return_value=stats):
+            response = self.client.get(
+                reverse("crud:stream_detail", args=[self.stream.id])
+            )
+        self.assertContains(response, "2.8 Мбит/с")
+        self.assertContains(response, "0 бит/с")
 
     def test_stream_detail_shows_stalled_badge(self):
         self.stream.zero_bandwidth_since = timezone.now() - timedelta(minutes=5)
@@ -2170,15 +2191,23 @@ class StreamEndBroadcastButtonVisibilityTests(TestCase):
     def get_detail(self):
         return self.client.get(reverse("crud:stream_detail", args=[self.stream.id]))
 
-    def assertHasEndBroadcastButton(self, response, stream):
-        self.assertContains(
-            response, reverse("crud:stream_end_broadcast", args=[stream.id])
+    def _end_broadcast_form_tag(self, response):
+        # Форма теперь рендерится всегда (см. crud/templates/crud/
+        # stream_detail.html) — видимость решает атрибут hidden, а не
+        # присутствие/отсутствие тега целиком (его снимает live_stats.js
+        # на лету, если поток стал live уже после отрисовки страницы), так
+        # что assertContains по одному лишь URL формы тут недостаточно.
+        match = re.search(
+            r"<form data-end-broadcast-form[^>]*>", response.content.decode()
         )
+        self.assertIsNotNone(match, "форма «Завершить эфир» не найдена в ответе")
+        return match.group(0)
+
+    def assertHasEndBroadcastButton(self, response, stream):
+        self.assertNotIn("hidden", self._end_broadcast_form_tag(response))
 
     def assertNoEndBroadcastButton(self, response, stream):
-        self.assertNotContains(
-            response, reverse("crud:stream_end_broadcast", args=[stream.id])
-        )
+        self.assertIn("hidden", self._end_broadcast_form_tag(response))
 
     def test_button_stays_visible_after_stream_drops_from_stat(self):
         # The whole point of the button is to let the user mark an

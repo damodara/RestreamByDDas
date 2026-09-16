@@ -1,6 +1,7 @@
 import hmac
 import json
 import logging
+import math
 
 from django.conf import settings
 from django.contrib import messages
@@ -170,6 +171,20 @@ def _format_uptime(seconds):
     return f"{secs} с"
 
 
+def _format_bitrate(bits_per_second):
+    """Человекочитаемая скорость — Кбит/Мбит/Гбит вместо длинного числа в
+    bit/s (например, «2756736 bit/s» вместо «2.8 Мбит/с»). Тот же принцип,
+    что и у _format_uptime выше: десятичные (1000-based) приставки, а не
+    двоичные — так принято для скорости передачи данных (в отличие от
+    formatBytes в live_stats.js, где 1024-based KB/MB — это размер файла)."""
+    if not bits_per_second:
+        return "0 бит/с"
+    units = ["бит/с", "Кбит/с", "Мбит/с", "Гбит/с"]
+    power = min(int(math.log(bits_per_second, 1000)), len(units) - 1)
+    value = bits_per_second / 1000**power
+    return f"{round(value) if power == 0 else round(value, 1)} {units[power]}"
+
+
 def _stream_stats(stream):
     """Общая логика между stream_detail (HTML) и stream_stats_json — держим
     в одном месте, чтобы обновление на лету (JS-поллинг) не могло разойтись
@@ -177,6 +192,8 @@ def _stream_stats(stream):
     stats = fetch_stream_stats(stream.stream_key)
     if stats and stats.get("live"):
         stats["uptime_display"] = _format_uptime(stats["uptime_seconds"])
+        stats["bw_in_display"] = _format_bitrate(stats["bw_in"])
+        stats["bw_out_display"] = _format_bitrate(stats["bw_out"])
     live = bool(stats and stats.get("live"))
     destinations = [
         {
