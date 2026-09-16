@@ -50,7 +50,9 @@ def _stream_live_status(stream, live_keys):
         d.enabled and d.push_status == Rtmp.PushStatus.ERROR
         for d in stream.destinations.all()
     )
-    return {"live": live, "push_error": push_error}
+    # bandwidth_stalled — свойство модели (см. crud/models.py), не зависит
+    # от live_keys/этого запроса: пишет и чистит только poll_stream_health.
+    return {"live": live, "push_error": push_error, "stalled": stream.bandwidth_stalled}
 
 
 @login_required

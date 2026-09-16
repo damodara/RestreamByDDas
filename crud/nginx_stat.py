@@ -68,6 +68,39 @@ def fetch_live_stream_keys():
     }
 
 
+def fetch_live_stream_bandwidth():
+    """{stream_key: {"bw_in": int, "bw_out": int}} для всех сейчас live
+    потоков — один запрос к /stat, тем же принципом "N+1 avoidance", что
+    и у fetch_live_stream_keys выше (нужно poll_stream_health, чтобы
+    отслеживать зависшие соединения — см. Stream.zero_bandwidth_since —
+    не открывая по отдельному /stat на каждый live-поток). Возвращает
+    None при недоступном /stat, тот же fail-soft, что у соседних функций."""
+    if not settings.NGINX_STAT_URL:
+        return None
+
+    try:
+        with urllib.request.urlopen(settings.NGINX_STAT_URL, timeout=2) as response:
+            root = ET.fromstring(response.read())
+    except (urllib.error.URLError, OSError, ET.ParseError):
+        logger.warning(
+            "fetch_live_stream_bandwidth: не удалось получить/разобрать %s",
+            settings.NGINX_STAT_URL,
+            exc_info=True,
+        )
+        return None
+
+    result = {}
+    for stream in root.findall("./server/application/live/stream"):
+        name = stream.findtext("name")
+        if not name:
+            continue
+        result[name] = {
+            "bw_in": int(stream.findtext("bw_in", "0")),
+            "bw_out": int(stream.findtext("bw_out", "0")),
+        }
+    return result
+
+
 def fetch_raw_stat():
     """Сырой XML /stat как его отдал nginx-rtmp, без парсинга — для
     crud:server_logs. Разобранные fetch_stream_stats/fetch_live_stream_keys

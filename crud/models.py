@@ -1,11 +1,20 @@
 import re
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from crud.fields import EncryptedCharField
+
+# Порог для Stream.bandwidth_stalled ниже — насколько долго bw_in=bw_out=0
+# при live=True (см. zero_bandwidth_since) считать не случайным провалом,
+# а реально зависшим соединением. poll_stream_health тикает раз в 30с
+# (SCAN_INTERVAL), так что 2 минуты — это 3-4 тика подряд, достаточно,
+# чтобы не дёргаться на кратковременную просадку битрейта.
+STALLED_BANDWIDTH_THRESHOLD = timedelta(minutes=2)
 
 
 def generate_stream_key():
@@ -82,9 +91,27 @@ class Stream(models.Model):
     # обрыва (флаг всё ещё True, а по /stat потока уже нет) — иначе оба
     # случая выглядят для сервера одинаково.
     expected_live = models.BooleanField(default=False)
+    # Момент, с которого поток live по /stat, но bw_in=bw_out=0 подряд —
+    # признак "зависшего" TCP-соединения: encoder отвалился без штатного
+    # закрытия (например, обрыв сети), а nginx ещё не заметил разрыв, так
+    # что /stat продолжает показывать live с застывшими bytes_in/out и
+    # нулевым текущим битрейтом. None = сейчас не наблюдается. Пишет и
+    # чистит только poll_stream_health (тот же принцип, что у
+    # expected_live выше) — обычный запрос страницы ничего не знает, что
+    # было на прошлом опросе, а этой management-команде для того и нужен
+    # регулярный тик, независимо от того, смотрит ли кто-то страницу.
+    zero_bandwidth_since = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.name
+
+    @property
+    def bandwidth_stalled(self):
+        return (
+            self.zero_bandwidth_since is not None
+            and timezone.now() - self.zero_bandwidth_since
+            >= STALLED_BANDWIDTH_THRESHOLD
+        )
 
     @property
     def publish_server(self):

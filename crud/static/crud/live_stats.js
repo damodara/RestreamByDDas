@@ -273,6 +273,10 @@
 							html +=
 								' <span class="badge error" title="У одной или нескольких дестинаций ошибка пуша">ошибка пуша</span>';
 						}
+						if (status.stalled) {
+							html +=
+								' <span class="badge error" title="Поток числится live, но по нему давно не идёт реальных данных — похоже на зависшее соединение">возможно зависло</span>';
+						}
 						slot.innerHTML = html;
 					});
 				})

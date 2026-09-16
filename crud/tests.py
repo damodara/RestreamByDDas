@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 import time
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -27,7 +28,12 @@ from crud.telegram_alerts import send_push_error_telegram, send_stream_drop_tele
 from crud.forms import StreamChatForm
 from crud.models import ChatMessage, Rtmp, Stream
 from crud.nginx_control import restart_stream
-from crud.nginx_stat import fetch_live_stream_keys, fetch_raw_stat, fetch_stream_stats
+from crud.nginx_stat import (
+    fetch_live_stream_bandwidth,
+    fetch_live_stream_keys,
+    fetch_raw_stat,
+    fetch_stream_stats,
+)
 from crud.server_load import get_server_load
 from crud.server_logs import read_django_log, read_nginx_config_info, read_nginx_log
 from crud.templatetags.ru_plural import ru_days
@@ -406,7 +412,13 @@ class IndexLiveJsonViewTests(TestCase):
             response.json(),
             {
                 "available": True,
-                "streams": {str(self.stream.id): {"live": True, "push_error": False}},
+                "streams": {
+                    str(self.stream.id): {
+                        "live": True,
+                        "push_error": False,
+                        "stalled": False,
+                    }
+                },
             },
         )
 
@@ -418,7 +430,13 @@ class IndexLiveJsonViewTests(TestCase):
             response.json(),
             {
                 "available": True,
-                "streams": {str(self.stream.id): {"live": False, "push_error": False}},
+                "streams": {
+                    str(self.stream.id): {
+                        "live": False,
+                        "push_error": False,
+                        "stalled": False,
+                    }
+                },
             },
         )
 
@@ -438,7 +456,7 @@ class IndexLiveJsonViewTests(TestCase):
             response = self.client.get(reverse("crud:index_live_json"))
         self.assertEqual(
             response.json()["streams"][str(self.stream.id)],
-            {"live": True, "push_error": True},
+            {"live": True, "push_error": True, "stalled": False},
         )
 
     def test_push_error_false_when_stream_not_live(self):
@@ -454,7 +472,7 @@ class IndexLiveJsonViewTests(TestCase):
             response = self.client.get(reverse("crud:index_live_json"))
         self.assertEqual(
             response.json()["streams"][str(self.stream.id)],
-            {"live": False, "push_error": False},
+            {"live": False, "push_error": False, "stalled": False},
         )
 
     def test_push_error_false_when_erroring_destination_disabled(self):
@@ -474,7 +492,7 @@ class IndexLiveJsonViewTests(TestCase):
             response = self.client.get(reverse("crud:index_live_json"))
         self.assertEqual(
             response.json()["streams"][str(self.stream.id)],
-            {"live": True, "push_error": False},
+            {"live": True, "push_error": False, "stalled": False},
         )
 
     def test_index_page_shows_push_error_badge(self):
@@ -492,6 +510,28 @@ class IndexLiveJsonViewTests(TestCase):
         ):
             response = self.client.get(reverse("crud:index"))
         self.assertContains(response, "ошибка пуша")
+
+    def test_index_page_shows_stalled_badge(self):
+        self.stream.zero_bandwidth_since = timezone.now() - timedelta(minutes=5)
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_live_stream_keys",
+            return_value={self.stream.stream_key},
+        ):
+            response = self.client.get(reverse("crud:index"))
+        self.assertContains(response, "возможно зависло")
+
+    def test_index_page_hides_stalled_badge_before_threshold(self):
+        self.stream.zero_bandwidth_since = timezone.now() - timedelta(seconds=10)
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        self.client.force_login(self.user)
+        with patch(
+            "crud.views.fetch_live_stream_keys",
+            return_value={self.stream.stream_key},
+        ):
+            response = self.client.get(reverse("crud:index"))
+        self.assertNotContains(response, "возможно зависло")
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)
@@ -789,6 +829,30 @@ class FetchLiveStreamKeysTests(TestCase):
         ):
             keys = fetch_live_stream_keys()
         self.assertEqual(keys, {"known-key"})
+
+
+class FetchLiveStreamBandwidthTests(TestCase):
+    @override_settings(NGINX_STAT_URL="")
+    def test_returns_none_when_not_configured(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen") as mock_urlopen:
+            self.assertIsNone(fetch_live_stream_bandwidth())
+            mock_urlopen.assert_not_called()
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_none_when_unreachable(self):
+        with patch("crud.nginx_stat.urllib.request.urlopen", side_effect=OSError):
+            self.assertIsNone(fetch_live_stream_bandwidth())
+
+    @override_settings(NGINX_STAT_URL=STAT_URL)
+    def test_returns_bandwidth_per_stream_key(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = STAT_XML
+        mock_response.__enter__.return_value = mock_response
+        with patch(
+            "crud.nginx_stat.urllib.request.urlopen", return_value=mock_response
+        ):
+            bandwidth = fetch_live_stream_bandwidth()
+        self.assertEqual(bandwidth, {"known-key": {"bw_in": 100, "bw_out": 200}})
 
 
 class FetchRawStatTests(TestCase):
@@ -1862,6 +1926,24 @@ class StreamStatsViewTests(TestCase):
         self.assertContains(response, "В эфире")
         self.assertContains(response, "1 мин 5 с")
 
+    def test_stream_detail_shows_stalled_badge(self):
+        self.stream.zero_bandwidth_since = timezone.now() - timedelta(minutes=5)
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.client.get(
+                reverse("crud:stream_detail", args=[self.stream.id])
+            )
+        self.assertContains(response, "возможно зависло")
+
+    def test_stream_detail_hides_stalled_badge_before_threshold(self):
+        self.stream.zero_bandwidth_since = timezone.now() - timedelta(seconds=10)
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        with patch("crud.views.fetch_stream_stats", return_value={"live": False}):
+            response = self.client.get(
+                reverse("crud:stream_detail", args=[self.stream.id])
+            )
+        self.assertNotContains(response, "возможно зависло")
+
     def test_index_renders_server_load_panel(self):
         response = self.client.get(reverse("crud:index"))
         self.assertEqual(response.status_code, 200)
@@ -2365,7 +2447,7 @@ class PollStreamHealthCommandTests(TestCase):
     def test_skips_entirely_when_stat_unavailable(self):
         with (
             patch(
-                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
                 return_value=None,
             ),
             patch(
@@ -2380,8 +2462,8 @@ class PollStreamHealthCommandTests(TestCase):
     def test_ignores_stream_that_is_still_live(self):
         with (
             patch(
-                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
-                return_value={self.stream.stream_key},
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+                return_value={self.stream.stream_key: {"bw_in": 100, "bw_out": 200}},
             ),
             patch(
                 "crud.management.commands.poll_stream_health.send_stream_drop_email"
@@ -2397,8 +2479,8 @@ class PollStreamHealthCommandTests(TestCase):
         self.stream.save(update_fields=["expected_live"])
         with (
             patch(
-                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
-                return_value=set(),
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+                return_value={},
             ),
             patch(
                 "crud.management.commands.poll_stream_health.send_stream_drop_email"
@@ -2422,8 +2504,8 @@ class PollStreamHealthCommandTests(TestCase):
         )
         with (
             patch(
-                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
-                return_value=set(),
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+                return_value={},
             ),
             patch(
                 "crud.management.commands.poll_stream_health.send_stream_drop_email"
@@ -2444,8 +2526,8 @@ class PollStreamHealthCommandTests(TestCase):
         self.user.save(update_fields=["broadcast_end_mode", "notify_on_push_error"])
         with (
             patch(
-                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
-                return_value=set(),
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+                return_value={},
             ),
             patch(
                 "crud.management.commands.poll_stream_health.send_stream_drop_email"
@@ -2463,8 +2545,8 @@ class PollStreamHealthCommandTests(TestCase):
         self.user.save(update_fields=["notify_on_push_error"])
         with (
             patch(
-                "crud.management.commands.poll_stream_health.fetch_live_stream_keys",
-                return_value=set(),
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+                return_value={},
             ),
             patch(
                 "crud.management.commands.poll_stream_health.send_stream_drop_email"
@@ -2478,6 +2560,81 @@ class PollStreamHealthCommandTests(TestCase):
         mock_telegram.assert_not_called()
         self.stream.refresh_from_db()
         self.assertFalse(self.stream.expected_live)
+
+    def test_dropped_stream_clears_zero_bandwidth_since(self):
+        self.stream.zero_bandwidth_since = timezone.now()
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        with (
+            patch(
+                "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+                return_value={},
+            ),
+            patch("crud.management.commands.poll_stream_health.send_stream_drop_email"),
+        ):
+            self.make_command()._tick()
+        self.stream.refresh_from_db()
+        self.assertIsNone(self.stream.zero_bandwidth_since)
+
+    def test_sets_zero_bandwidth_since_on_first_zero_reading(self):
+        with patch(
+            "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+            return_value={self.stream.stream_key: {"bw_in": 0, "bw_out": 0}},
+        ):
+            self.make_command()._tick()
+        self.stream.refresh_from_db()
+        self.assertIsNotNone(self.stream.zero_bandwidth_since)
+
+    def test_does_not_reset_zero_bandwidth_since_on_repeated_zero_reading(self):
+        first_seen = timezone.now() - timedelta(minutes=1)
+        self.stream.zero_bandwidth_since = first_seen
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        with patch(
+            "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+            return_value={self.stream.stream_key: {"bw_in": 0, "bw_out": 0}},
+        ):
+            self.make_command()._tick()
+        self.stream.refresh_from_db()
+        self.assertEqual(self.stream.zero_bandwidth_since, first_seen)
+
+    def test_clears_zero_bandwidth_since_once_bandwidth_recovers(self):
+        self.stream.zero_bandwidth_since = timezone.now() - timedelta(minutes=1)
+        self.stream.save(update_fields=["zero_bandwidth_since"])
+        with patch(
+            "crud.management.commands.poll_stream_health.fetch_live_stream_bandwidth",
+            return_value={self.stream.stream_key: {"bw_in": 500, "bw_out": 500}},
+        ):
+            self.make_command()._tick()
+        self.stream.refresh_from_db()
+        self.assertIsNone(self.stream.zero_bandwidth_since)
+
+
+class BandwidthStalledPropertyTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="stalledowner",
+            email="stalledowner@example.com",
+            password="ownerpass123",
+        )
+
+    def test_false_when_never_recorded(self):
+        stream = Stream.objects.create(owner=self.user, name="Never zero")
+        self.assertFalse(stream.bandwidth_stalled)
+
+    def test_false_before_threshold_elapsed(self):
+        stream = Stream.objects.create(
+            owner=self.user,
+            name="Just started",
+            zero_bandwidth_since=timezone.now() - timedelta(seconds=30),
+        )
+        self.assertFalse(stream.bandwidth_stalled)
+
+    def test_true_once_threshold_elapsed(self):
+        stream = Stream.objects.create(
+            owner=self.user,
+            name="Long stalled",
+            zero_bandwidth_since=timezone.now() - timedelta(minutes=5),
+        )
+        self.assertTrue(stream.bandwidth_stalled)
 
 
 @override_settings(RTMP_HOOK_SECRET=HOOK_SECRET)

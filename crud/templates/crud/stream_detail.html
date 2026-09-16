@@ -41,6 +41,9 @@
 		<h2 style="margin-top:0">
 			Статистика
 			<span data-live-badge class="{% if stats and stats.live %}badge live{% else %}badge offline{% endif %}">{% if stats and stats.live %}в эфире{% else %}не в эфире{% endif %}</span>
+			{% if stream.bandwidth_stalled %}
+				<span class="badge error" title="Поток числится live по /stat, но по нему давно не идёт реальных данных — похоже на зависшее соединение (encoder отвалился без штатного закрытия)">возможно зависло</span>
+			{% endif %}
 		</h2>
 		<div data-stats-body>
 			{% if stats is None %}
